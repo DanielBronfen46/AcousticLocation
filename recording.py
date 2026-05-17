@@ -7,7 +7,7 @@ import soundfile as sf
 
 # --- Configuration ---
 FS = 48000  # Sample rate (44100 Hz is standard for audio)
-DURATION = 3  # Duration of recording in seconds
+DURATION = 15  # Duration of recording in seconds
 OUTPUT_FOLDER = "mic_output"
 USE_VOICEMEETER = True
 
@@ -42,11 +42,13 @@ MIC1_NAME = "Microphone (USB PnP Sound Device)"
 MIC2_NAME = "Microphone (USBAudio2.0)"
 MIC1_ID = get_device_id_by_name(MIC1_NAME, hostapi_name="Windows WASAPI")
 MIC2_ID = get_device_id_by_name(MIC2_NAME, hostapi_name="Windows WASAPI")
-VOICEMEETER_NAME = "Voicemeeter Out B1"
-VOICEMEETER_ID = get_device_id_by_name(VOICEMEETER_NAME, hostapi_name="Windows WASAPI")
 
 
-def record_two_mics_stereo_virtual_device(fs=FS, duration=DURATION, device_id=VOICEMEETER_ID):
+def record_two_mics_stereo_virtual_device(fs=FS, duration=DURATION):
+    VOICEMEETER_NAME = "Voicemeeter Out B1"
+    VOICEMEETER_ID = get_device_id_by_name(VOICEMEETER_NAME, hostapi_name="Windows WASAPI")
+    device_id = VOICEMEETER_ID
+
     print(f"Recording from VoiceMeeter for {duration} seconds...")
 
     # Notice we use channels=2 here to capture the stereo VoiceMeeter feed
