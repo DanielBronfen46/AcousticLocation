@@ -1,3 +1,9 @@
+import os
+
+# 1. CRITICAL: Turn on the hidden ASIO switch FIRST
+# This must happen before importing sounddevice!
+os.environ["SD_ENABLE_ASIO"] = "1"
+
 import time
 
 import sounddevice as sd
@@ -9,7 +15,35 @@ import soundfile as sf
 FS = 48000  # Sample rate (44100 Hz is standard for audio)
 DURATION = 15  # Duration of recording in seconds
 OUTPUT_FOLDER = "mic_output"
-USE_VOICEMEETER = True
+USE_VOICEMEETER = False
+
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+def record_perfect_sync(fs=FS, duration=DURATION):
+    # Find ASIO4ALL
+    try:
+        asio_id = next(i for i, d in enumerate(sd.query_devices()) if "ASIO4ALL" in d['name'])
+    except StopIteration:
+        raise ValueError("ASIO4ALL not found.")
+
+    print(f"Recording perfectly synced mics for {duration} seconds...")
+
+    # We MUST ask for 4 channels here because both mics are stereo
+    quad_audio = sd.rec(int(duration * fs), samplerate=fs, channels=4, device=asio_id)
+    sd.wait()
+
+    # Slice the arrays.
+    # Grab Channel 0 (Index 0) for Mic 1
+    # Grab Channel 3 (Index 2) for Mic 2
+    audio1 = quad_audio[:, 0]
+    audio2 = quad_audio[:, 2]
+
+    # Save them
+    save_mic_output(audio1, "mic1_synced")
+    save_mic_output(audio2, "mic2_synced")
+
+    print("Recording complete! You now have both mics.")
+    return audio1, audio2
 
 def get_device_id_by_name(device_name, hostapi_name):
     """
@@ -132,7 +166,7 @@ def get_two_signals(fs=FS, duration=DURATION):
     if USE_VOICEMEETER:
         audio1, audio2 = record_two_mics_stereo_virtual_device(fs=fs, duration=duration)
     else:
-        audio1, audio2 = record_two_mics_directly(fs=fs, duration=duration)
+        audio1, audio2 = record_perfect_sync(fs=fs, duration=duration)
 
     sig1 = audio1.flatten()
     sig2 = audio2.flatten()

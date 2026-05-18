@@ -7,7 +7,7 @@ import numpy as np
 from scipy import signal
 import matplotlib.pyplot as plt
 
-from recording import get_two_signals, FS, USE_VOICEMEETER
+from recording import get_two_signals, FS, USE_VOICEMEETER, DURATION
 
 
 def calculate_cross_correlation(sig1 ,sig2, fs=FS):
@@ -40,6 +40,24 @@ def calculate_cross_correlation(sig1 ,sig2, fs=FS):
         print("Result: Incredible! The microphones are perfectly aligned.")
     print(f"len_sig1: {len(sig1)}, len_sig2: {len(sig2)}")
     print("-" * 30)
+
+    lags_in_seconds = lags / fs
+
+    # We plot the absolute value of the correlation to clearly see the magnitude peak
+    plt.figure(figsize=(10, 4))
+    plt.plot(lags_in_seconds, np.abs(correlation), color='purple', alpha=0.8)
+
+    # Draw a vertical dashed red line exactly where the maximum peak occurs
+    plt.axvline(x=delay_in_seconds, color='red', linestyle='--', linewidth=2,
+                label=f'Calculated Delay: {delay_in_seconds:.5f}s')
+
+    plt.title("Cross-Correlation vs. Delay Time")
+    plt.xlabel("Delay (seconds)")
+    plt.ylabel("Correlation Magnitude")
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.legend(loc="upper right")
+    plt.tight_layout()
+    plt.show()
 
     return lag_in_samples
 
@@ -153,8 +171,8 @@ def align_signals(sig1, sig2, lag_in_samples):
 
     return aligned_sig1, aligned_sig2
 
-def record_and_align():
-    sig1, sig2 = get_two_signals()
+def record_and_align(duration=DURATION):
+    sig1, sig2 = get_two_signals(duration=duration)
 
     align_and_plot(sig1, sig2)
 
@@ -233,7 +251,7 @@ def record_split_and_align():
 
 
 def main():
-    record_split_and_align()
+    record_and_align(duration=60)
 
 if __name__ == "__main__":
     main()
