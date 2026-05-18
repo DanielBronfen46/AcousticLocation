@@ -24,7 +24,11 @@ def calculate_cross_correlation(sig1 ,sig2, fs=FS):
     max_corr_idx = np.argmax(np.abs(correlation))
     lag_in_samples = lags[max_corr_idx]
 
-    # 4. Convert the sample delay into an actual time delay in seconds
+
+    return lag_in_samples
+
+def print_alignment_results(sig1, sig2,lag_in_samples, fs=FS):
+          # 4. Convert the sample delay into an actual time delay in seconds
     delay_in_seconds = convert_samples_to_seconds(lag_in_samples, fs)
 
     print("-" * 30)
@@ -40,8 +44,6 @@ def calculate_cross_correlation(sig1 ,sig2, fs=FS):
         print("Result: Incredible! The microphones are perfectly aligned.")
     print(f"len_sig1: {len(sig1)}, len_sig2: {len(sig2)}")
     print("-" * 30)
-
-    return lag_in_samples
 
 def convert_samples_to_seconds(num_samples, fs=FS):
     return num_samples / fs
@@ -162,7 +164,7 @@ def align_and_plot(sig1, sig2):
     lag_in_samples = calculate_cross_correlation(sig1, sig2)
 
 
-
+    print_alignment_results(sig1, sig2, lag_in_samples)
 
     aligned1, aligned2 = align_signals(sig1, sig2, lag_in_samples)
 
@@ -231,6 +233,39 @@ def record_split_and_align():
     align_and_plot(sig1a, sig2a)
     align_and_plot(sig1b, sig2b)
 
+
+def calculate_gcc_phat(sig1, sig2, fs=FS):
+    n1 = len(sig1)
+    n2 = len(sig2)
+    
+    # 1. Zero-pad the arrays to avoid circular wrapping!
+    # The minimum safe length for linear convolution/correlation is N + M - 1
+    n_pad = n1 + n2 - 1 
+    
+    # 2. Compute FFT with the padded length
+    fft1 = np.fft.rfft(sig1, n=n_pad)
+    fft2 = np.fft.rfft(sig2, n=n_pad)
+    
+    # 3. Compute the Cross-Power Spectrum
+    cross_power = fft1 * np.conj(fft2)
+    
+    # 4. Apply the Phase Transform (PHAT) weighting
+    phat_weighting = cross_power / (np.abs(cross_power) + 1e-15)
+    
+    # 5. Inverse FFT to get back to the time domain
+    cc = np.fft.irfft(phat_weighting, n=n_pad)
+    
+    # 6. Shift the array so zero-lag is dead center
+    cc = np.fft.fftshift(cc)
+    
+    # 7. Generate matching lags for the shifted array
+    lags = np.arange(-(n_pad // 2), (n_pad + 1) // 2)
+    
+    # 8. Find the exact peak
+    max_corr_idx = np.argmax(np.abs(cc))
+    lag_in_samples = lags[max_corr_idx]
+    
+    return lag_in_samples
 
 def main():
     record_split_and_align()

@@ -137,4 +137,7 @@ def get_two_signals(fs=FS, duration=DURATION):
     sig1 = audio1.flatten()
     sig2 = audio2.flatten()
 
+    sig1 = sig1 / np.max(np.abs(sig1))
+    sig2 = sig2 / np.max(np.abs(sig2))
+    
     return sig1, sig2
