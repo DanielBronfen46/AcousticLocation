@@ -38,6 +38,7 @@ def calculate_cross_correlation(sig1 ,sig2, fs=FS):
         print("Result: Mic 2 heard the clap first.")
     else:
         print("Result: Incredible! The microphones are perfectly aligned.")
+    print(f"len_sig1: {len(sig1)}, len_sig2: {len(sig2)}")
     print("-" * 30)
 
     return lag_in_samples
@@ -122,7 +123,6 @@ def plot_both_signals_around_max(sig1, sig2, fs=FS, title="Microphone Comparison
 
     plt.tight_layout()
     plt.show()
-
 
 def align_signals(sig1, sig2, lag_in_samples):
     """
@@ -209,8 +209,31 @@ def save_stats(sig1, sig2, lag_in_samples, fs=FS):
 
     print(f"Appended alignment statistics to {stats_filename}")
 
+
+def record_split_and_align():
+    sig1, sig2 = get_two_signals(duration = 10)
+
+    # 1. Guarantee both arrays are the exact same length before splitting
+    min_len = min(len(sig1), len(sig2))
+    sig1_matched = sig1[:min_len]
+    sig2_matched = sig2[:min_len]
+
+    # 2. Find the exact midpoint (using // ensures it returns a whole integer)
+    midpoint = min_len // 2
+
+    # 3. Slice the arrays into halves
+    sig1a = sig1_matched[:midpoint]
+    sig1b = sig1_matched[midpoint:]
+
+    sig2a = sig2_matched[:midpoint]
+    sig2b = sig2_matched[midpoint:]
+
+    align_and_plot(sig1a, sig2a)
+    align_and_plot(sig1b, sig2b)
+
+
 def main():
-    record_and_align()
+    record_split_and_align()
 
 if __name__ == "__main__":
     main()
