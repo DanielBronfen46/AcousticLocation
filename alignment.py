@@ -176,18 +176,33 @@ def record_and_align(duration=DURATION):
 
     align_and_plot(sig1, sig2)
 
+def plot_dot_product(sig1, sig2, fs=FS, title="Element-wise Dot Product"):
+    """
+    Plots the element-wise product of two signals.
+    Highly useful after alignment to see where the signals reinforce each other.
+    """
+    time_axis = np.arange(len(sig1)) / fs
+    product = sig1 * sig2
+
+    plt.figure(figsize=(10, 4))
+    plt.plot(time_axis, product, color='green', alpha=0.8)
+
+    plt.title(title)
+    plt.xlabel("Time (seconds)")
+    plt.ylabel("Product Amplitude")
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.tight_layout()
+    plt.show()
+
 def align_and_plot(sig1, sig2):
     lag_in_samples = calculate_cross_correlation(sig1, sig2)
-
-
-
 
     aligned1, aligned2 = align_signals(sig1, sig2, lag_in_samples)
 
     plot_both_signals(sig1, sig2, title="Before Alignment")
     plot_both_signals_around_max(aligned1, aligned2, title="After Alignment around Max", zoom_window=0.02)
     plot_both_signals(aligned1, aligned2, title="After Alignment")
-
+    plot_dot_product(aligned1, aligned2, title="Dot Product (Aligned)")
 
     save_stats(sig1, sig2, lag_in_samples)
 
