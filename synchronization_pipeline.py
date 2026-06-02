@@ -38,7 +38,7 @@ def slice_audio(sig, start_sec, end_sec=None, fs=FS):
 
 # ==========================================
 # 3. GUIDED RECORDING FUNCTION
-# ==========================================
+# =====================================
 def record_guided_session(clap_perf, sine_perf, target_start, total_duration, f_played, fs=FS):
     """
     Calculates live terminal countdowns based on the parameter windows.
@@ -51,21 +51,27 @@ def record_guided_session(clap_perf, sine_perf, target_start, total_duration, f_
     def print_instructions():
         print("\n🎙️  RECORDING STARTED! Follow the instructions:\n")
 
-        if clap_start > 0:
-            time.sleep(clap_start)
+        # 1. Wait for Sine Wave start
+        if sine_start > 0:
+            time.sleep(sine_start)
 
-        print(f"--> [{clap_start}s - {clap_end}s] ACTION: Create delta functions!")
-        time.sleep(clap_end - clap_start)
-
-        print(f"--> [{clap_end}s - {sine_start}s] PREPARE: Get ready to play the {f_played}Hz Sine Wave...")
-        time.sleep(sine_start - clap_end)
-
+        # 2. Sine Wave Action
         print(f"--> [{sine_start}s - {sine_end}s] ACTION: Play {f_played}Hz sine wave!")
         time.sleep(sine_end - sine_start)
 
-        print(f"--> [{sine_end}s - {target_start}s] PREPARE: Stop the sine wave. Get ready to speak.")
-        time.sleep(target_start - sine_end)
+        # 3. Prepare for Claps
+        print(f"--> [{sine_end}s - {clap_start}s] PREPARE: Stop the sine wave. Get ready to clap...")
+        time.sleep(clap_start - sine_end)
 
+        # 4. Claps Action (Delta functions)
+        print(f"--> [{clap_start}s - {clap_end}s] ACTION: Create delta functions (Clap)!")
+        time.sleep(clap_end - clap_start)
+
+        # 5. Prepare for Target Audio
+        print(f"--> [{clap_end}s - {target_start}s] PREPARE: Stop clapping. Get ready to speak.")
+        time.sleep(target_start - clap_end)
+
+        # 6. Target Audio Action
         print(f"--> [{target_start}s - {total_duration}s] ACTION: Recording the actual target audio...")
         # The main thread blocks while recording, so we don't strictly need a final sleep here.
 
@@ -84,7 +90,6 @@ def record_guided_session(clap_perf, sine_perf, target_start, total_duration, f_
     print("\n✅ Recording complete! Processing pipeline starting...\n")
 
     return sig1, sig2
-
 
 def optimize_subsample_delay(sig1, sig2, fs=FS):
     """
