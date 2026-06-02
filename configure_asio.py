@@ -17,8 +17,9 @@ try:
 
     # Open a dummy stream to force the system tray icon to appear
     with sd.InputStream(device=asio_id, channels=1, samplerate=48000):
+        time_awake = 120
         print("Look at your Windows System Tray (bottom right) for a green play button icon with an arrow.")
-        print("You have 30 seconds to open it...")
-        time.sleep(120)
+        print(f"You have {time_awake} seconds to open it...")
+        time.sleep(time_awake)
 except StopIteration:
     print("Could not find ASIO4ALL. Did you install it, or do you need to restart your IDE?")

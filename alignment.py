@@ -7,62 +7,7 @@ import numpy as np
 from scipy import signal
 import matplotlib.pyplot as plt
 
-from recording import get_two_signals, FS, USE_VOICEMEETER, DURATION
-
-
-def calculate_cross_correlation(sig1 ,sig2, fs=FS):
-
-    # 1. Perform the cross-correlation
-    # We use method='fft' because doing this in the time domain would take forever
-    correlation = signal.correlate(sig2, sig1, mode='full', method='fft')
-
-    # 2. Generate an array of lags (the possible sample shifts)
-    lags = signal.correlation_lags(len(sig2), len(sig1), mode='full')
-
-    # 3. Find the exact lag where the two signals are most similar (the clap)
-    # We use np.abs() just in case one microphone's polarity is inverted
-    max_corr_idx = np.argmax(np.abs(correlation))
-    lag_in_samples = lags[max_corr_idx]
-
-    # 4. Convert the sample delay into an actual time delay in seconds
-    delay_in_seconds = convert_samples_to_seconds(lag_in_samples, fs)
-
-    print("-" * 30)
-    print(f"Delay in samples: {lag_in_samples}")
-    print(f"Delay in seconds: {delay_in_seconds:.5f}s")
-
-    # 5. Interpret the results
-    if lag_in_samples > 0:
-        print("Result: Mic 1 heard the clap first.")
-    elif lag_in_samples < 0:
-        print("Result: Mic 2 heard the clap first.")
-    else:
-        print("Result: Incredible! The microphones are perfectly aligned.")
-    print(f"len_sig1: {len(sig1)}, len_sig2: {len(sig2)}")
-    print("-" * 30)
-
-    lags_in_seconds = lags / fs
-
-    # We plot the absolute value of the correlation to clearly see the magnitude peak
-    plt.figure(figsize=(10, 4))
-    plt.plot(lags_in_seconds, np.abs(correlation), color='purple', alpha=0.8)
-
-    # Draw a vertical dashed red line exactly where the maximum peak occurs
-    plt.axvline(x=delay_in_seconds, color='red', linestyle='--', linewidth=2,
-                label=f'Calculated Delay: {delay_in_seconds:.5f}s')
-
-    plt.title("Cross-Correlation vs. Delay Time")
-    plt.xlabel("Delay (seconds)")
-    plt.ylabel("Correlation Magnitude")
-    plt.grid(True, linestyle='--', alpha=0.6)
-    plt.legend(loc="upper right")
-    plt.tight_layout()
-    plt.show()
-
-    return lag_in_samples
-
-def convert_samples_to_seconds(num_samples, fs=FS):
-    return num_samples / fs
+from recording import record_two_signals, FS, USE_VOICEMEETER, trim_zeroes, load_two_wav_signals
 
 
 def plot_signal(signal_data, fs=FS, title="Audio Signal"):
@@ -142,6 +87,95 @@ def plot_both_signals_around_max(sig1, sig2, fs=FS, title="Microphone Comparison
     plt.tight_layout()
     plt.show()
 
+def plot_two_signals_around_point(sig1, sig2, point_time, fs=FS, title=f"Zoomed in Microphone Comparison", zoom_window=0.1):
+    time_axis1 = np.arange(len(sig1)) / fs
+    time_axis2 = np.arange(len(sig2)) / fs
+
+    # 3. Calculate the viewing window boundaries
+    x_min = max(0, point_time - zoom_window)  # Ensure we don't zoom past 0 seconds
+    x_max = min(len(sig1) / fs, point_time + zoom_window)
+
+    plt.figure(figsize=(12, 5))
+
+    # Plot Mic 1
+    plt.plot(time_axis1, sig1, label="Mic 1", color='blue', alpha=0.7)
+    # Plot Mic 2
+    plt.plot(time_axis2, sig2, label="Mic 2", color='red', alpha=0.7)
+
+    plt.title(title + f" (Zoomed at {point_time:.2f}s)")
+    plt.xlabel("Time (seconds)")
+    plt.ylabel("Amplitude")
+    plt.legend(loc="upper right")
+    plt.grid(True, linestyle='--', alpha=0.6)
+
+    # Apply the zoom
+    plt.xlim(x_min, x_max)
+
+    plt.tight_layout()
+    plt.show()
+
+def compare_two_signals_at_multiple_points(sig1, sig2, n_points, fs=FS, zoom_window=0.1):
+    time_len = len(sig1) / fs
+    point_arr = np.linspace(zoom_window, time_len-zoom_window, num=n_points, endpoint=True)
+
+    for i in range(len(point_arr)):
+        plot_two_signals_around_point(sig1, sig2, point_arr[i], fs=fs, title=f"Microphone Comparison {i+1}/{n_points}")
+
+
+def calculate_cross_correlation(sig1 ,sig2, fs=FS):
+
+    # 1. Perform the cross-correlation
+    # We use method='fft' because doing this in the time domain would take forever
+    correlation = signal.correlate(sig2, sig1, mode='full', method='fft')
+
+    # 2. Generate an array of lags (the possible sample shifts)
+    lags = signal.correlation_lags(len(sig2), len(sig1), mode='full')
+
+    # 3. Find the exact lag where the two signals are most similar (the clap)
+    # We use np.abs() just in case one microphone's polarity is inverted
+    max_corr_idx = np.argmax(np.abs(correlation))
+    lag_in_samples = lags[max_corr_idx]
+
+    # 4. Convert the sample delay into an actual time delay in seconds
+    delay_in_seconds = convert_samples_to_seconds(lag_in_samples, fs)
+
+    print("-" * 30)
+    print(f"Delay in samples: {lag_in_samples}")
+    print(f"Delay in seconds: {delay_in_seconds:.5f}s")
+
+    # 5. Interpret the results
+    if lag_in_samples > 0:
+        print("Result: Mic 1 heard the clap first.")
+    elif lag_in_samples < 0:
+        print("Result: Mic 2 heard the clap first.")
+    else:
+        print("Result: Incredible! The microphones are perfectly aligned.")
+    print(f"len_sig1: {len(sig1)}, len_sig2: {len(sig2)}")
+    print("-" * 30)
+
+    lags_in_seconds = lags / fs
+
+    # We plot the absolute value of the correlation to clearly see the magnitude peak
+    plt.figure(figsize=(10, 4))
+    plt.plot(lags_in_seconds, np.abs(correlation), color='purple', alpha=0.8)
+
+    # Draw a vertical dashed red line exactly where the maximum peak occurs
+    plt.axvline(x=delay_in_seconds, color='red', linestyle='--', linewidth=2,
+                label=f'Calculated Delay: {delay_in_seconds:.5f}s')
+
+    plt.title("Cross-Correlation vs. Delay Time")
+    plt.xlabel("Delay (seconds)")
+    plt.ylabel("Correlation Magnitude")
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.legend(loc="upper right")
+    plt.tight_layout()
+    plt.show()
+
+    return lag_in_samples
+
+def convert_samples_to_seconds(num_samples, fs=FS):
+    return num_samples / fs
+
 def align_signals(sig1, sig2, lag_in_samples):
     """
     Aligns two signals based on the calculated lag and truncates
@@ -171,29 +205,6 @@ def align_signals(sig1, sig2, lag_in_samples):
 
     return aligned_sig1, aligned_sig2
 
-def record_and_align(duration=DURATION):
-    sig1, sig2 = get_two_signals(duration=duration)
-
-    align_and_plot(sig1, sig2)
-
-def plot_dot_product(sig1, sig2, fs=FS, title="Element-wise Dot Product"):
-    """
-    Plots the element-wise product of two signals.
-    Highly useful after alignment to see where the signals reinforce each other.
-    """
-    time_axis = np.arange(len(sig1)) / fs
-    product = sig1 * sig2
-
-    plt.figure(figsize=(10, 4))
-    plt.plot(time_axis, product, color='green', alpha=0.8)
-
-    plt.title(title)
-    plt.xlabel("Time (seconds)")
-    plt.ylabel("Product Amplitude")
-    plt.grid(True, linestyle='--', alpha=0.6)
-    plt.tight_layout()
-    plt.show()
-
 def align_and_plot(sig1, sig2):
     lag_in_samples = calculate_cross_correlation(sig1, sig2)
 
@@ -202,9 +213,17 @@ def align_and_plot(sig1, sig2):
     plot_both_signals(sig1, sig2, title="Before Alignment")
     plot_both_signals_around_max(aligned1, aligned2, title="After Alignment around Max", zoom_window=0.02)
     plot_both_signals(aligned1, aligned2, title="After Alignment")
-    plot_dot_product(aligned1, aligned2, title="Dot Product (Aligned)")
 
     save_stats(sig1, sig2, lag_in_samples)
+
+    aligned1, aligned2 = trim_zeroes(aligned1, aligned2)
+
+    return aligned1, aligned2, lag_in_samples
+
+def record_and_align(duration):
+    sig1, sig2 = record_two_signals(duration=duration)
+
+    align_and_plot(sig1, sig2)
 
 def save_stats(sig1, sig2, lag_in_samples, fs=FS):
     lag_in_seconds = convert_samples_to_seconds(lag_in_samples, fs)
@@ -242,14 +261,10 @@ def save_stats(sig1, sig2, lag_in_samples, fs=FS):
 
     print(f"Appended alignment statistics to {stats_filename}")
 
-
 def record_split_and_align():
-    sig1, sig2 = get_two_signals(duration = 10)
+    sig1_matched, sig2_matched = record_two_signals(duration = 10)
 
-    # 1. Guarantee both arrays are the exact same length before splitting
-    min_len = min(len(sig1), len(sig2))
-    sig1_matched = sig1[:min_len]
-    sig2_matched = sig2[:min_len]
+    min_len = min(len(sig1_matched), len(sig2_matched))
 
     # 2. Find the exact midpoint (using // ensures it returns a whole integer)
     midpoint = min_len // 2
@@ -264,9 +279,14 @@ def record_split_and_align():
     align_and_plot(sig1a, sig2a)
     align_and_plot(sig1b, sig2b)
 
+def load_and_align(file_desc):
+    sig1, sig2 = load_two_wav_signals(file_desc)
+
+    align_and_plot(sig1, sig2)
+
 
 def main():
-    record_and_align(duration=60)
+    load_and_align("FINAL")
 
 if __name__ == "__main__":
     main()

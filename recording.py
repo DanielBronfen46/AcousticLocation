@@ -1,32 +1,29 @@
 import os
 
-# 1. CRITICAL: Turn on the hidden ASIO switch FIRST
-# This must happen before importing sounddevice!
-os.environ["SD_ENABLE_ASIO"] = "1"
 
-import time
+from datetime import datetime
 
 import sounddevice as sd
 import numpy as np
 import soundfile as sf
-
+from scipy.signal import butter, filtfilt
 
 # --- Configuration ---
 FS = 48000  # Sample rate (44100 Hz is standard for audio)
-DURATION = 15  # Duration of recording in seconds
 OUTPUT_FOLDER = "mic_output"
 USE_VOICEMEETER = False
 
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-def record_perfect_sync(fs=FS, duration=DURATION):
+def record_asio(duration, fs=FS):
+    os.environ["SD_ENABLE_ASIO"] = "1"
     # Find ASIO4ALL
     try:
         asio_id = next(i for i, d in enumerate(sd.query_devices()) if "ASIO4ALL" in d['name'])
     except StopIteration:
         raise ValueError("ASIO4ALL not found.")
 
-    print(f"Recording perfectly synced mics for {duration} seconds...")
+    print(f"Recording mics from asio for {duration} seconds...")
 
     # We MUST ask for 4 channels here because both mics are stereo
     quad_audio = sd.rec(int(duration * fs), samplerate=fs, channels=4, device=asio_id)
@@ -39,8 +36,8 @@ def record_perfect_sync(fs=FS, duration=DURATION):
     audio2 = quad_audio[:, 2]
 
     # Save them
-    save_mic_output(audio1, "mic1_synced")
-    save_mic_output(audio2, "mic2_synced")
+    save_mic_output(audio1, "asio", "mic1")
+    save_mic_output(audio2, "asio", "mic2")
 
     print("Recording complete! You now have both mics.")
     return audio1, audio2
@@ -71,14 +68,7 @@ def get_device_id_by_name(device_name, hostapi_name):
     # If it can't find it, raise an error so you know immediately
     raise ValueError(f"Could not find an input device matching '{device_name}' on {hostapi_name}.")
 
-print(sd.query_devices())
-MIC1_NAME = "Microphone (USB PnP Sound Device)"
-MIC2_NAME = "Microphone (USBAudio2.0)"
-MIC1_ID = get_device_id_by_name(MIC1_NAME, hostapi_name="Windows WASAPI")
-MIC2_ID = get_device_id_by_name(MIC2_NAME, hostapi_name="Windows WASAPI")
-
-
-def record_two_mics_stereo_virtual_device(fs=FS, duration=DURATION):
+def record_two_mics_stereo_virtual_device(duration, fs=FS):
     VOICEMEETER_NAME = "Voicemeeter Out B1"
     VOICEMEETER_ID = get_device_id_by_name(VOICEMEETER_NAME, hostapi_name="Windows WASAPI")
     device_id = VOICEMEETER_ID
@@ -99,13 +89,20 @@ def record_two_mics_stereo_virtual_device(fs=FS, duration=DURATION):
     audio2 = stereo_audio[:, 1]
 
     # Save to WAV files
-    save_mic_output(audio1, "mic1_voicemeeter")
-    save_mic_output(audio2, "mic2_voicemeeter")
+    save_mic_output(audio1, "voicemeeter", "mic1")
+    save_mic_output(audio2, "voicemeeter", "mic2")
 
     return audio1, audio2
 
-def record_two_mics_directly(fs=FS, duration=DURATION, mic1_id=MIC1_ID, mic2_id=MIC2_ID):
-    print(f"Recording for {duration} seconds...")
+def record_two_mics_directly(duration, fs=FS):
+    #print(sd.query_devices())
+    MIC1_NAME = "Microphone (USB PnP Sound Device)"
+    MIC2_NAME = "Microphone (USBAudio2.0)"
+    mic1_id = get_device_id_by_name(MIC1_NAME, hostapi_name="Windows WASAPI")
+    mic2_id = get_device_id_by_name(MIC2_NAME, hostapi_name="Windows WASAPI")
+
+
+    print(f"Recording mics directly for {duration} seconds...")
 
     # Query the devices to see how many channels they natively expect (prevents WASAPI crashes)
     ch1 = int(sd.query_devices(mic1_id)['max_input_channels'])
@@ -149,26 +146,136 @@ def record_two_mics_directly(fs=FS, duration=DURATION, mic1_id=MIC1_ID, mic2_id=
         audio2 = audio2[:, 0]
 
     # Save to WAV files (sf.write naturally saves 1D arrays as mono files)
-    save_mic_output(audio1, "mic1_output")
-    save_mic_output(audio2, "mic2_output")
+    save_mic_output(audio1, "recording", f"{duration}s_mic1")
+    save_mic_output(audio2, "recording", f"{duration}s_mic2")
 
     return audio1, audio2
 
-def save_mic_output(audio, title, fs=FS):
-    seconds = int(time.time())
-    file_name = f'{OUTPUT_FOLDER}/{title}_{seconds}.wav'
+def save_mic_output(audio, prefix, suffix="", fs=FS):
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    file_name = f'{OUTPUT_FOLDER}/{prefix}_{timestamp}_{suffix}.wav'
     sf.write(file_name, audio, fs)
     print(f"Saved {file_name}")
 
 
+def match_signal_length(sig1, sig2):
+    min_len = min(len(sig1), len(sig2))
+    sig1_matched = sig1[:min_len]
+    sig2_matched = sig2[:min_len]
 
-def get_two_signals(fs=FS, duration=DURATION):
+    return sig1_matched, sig2_matched
+
+def trim_zeroes(sig1, sig2):
+    """
+    Finds the exact start and end of the valid data in both signals
+    (ignoring 0.0 padding) and crops BOTH signals to the shared overlapping window.
+    Safely handles length mismatches and zero-padding on either signal.
+    """
+    # 1. Guarantee a 1:1 time mapping by truncating to the shortest length
+    s1, s2 = match_signal_length(sig1, sig2)
+
+    # 2. Find all indices where the signals have real data
+    valid_indices_1 = np.where(s1 != 0.0)[0]
+    valid_indices_2 = np.where(s2 != 0.0)[0]
+
+    # Failsafe: if one array is completely empty
+    if len(valid_indices_1) == 0 or len(valid_indices_2) == 0:
+        print("Warning: One or both signals are entirely zeros.")
+        return s1, s2
+
+    # 3. Get the independent bounds for both signals
+    start1, end1 = valid_indices_1[0], valid_indices_1[-1]
+    start2, end2 = valid_indices_2[0], valid_indices_2[-1]
+
+    # 4. Calculate the shared overlapping window
+    # Start when BOTH have started, stop when EITHER stops
+    start_idx = max(start1, start2)
+    end_idx = min(end1, end2)
+
+    # Failsafe: if they somehow don't overlap at all
+    if start_idx > end_idx:
+        print("Warning: Signals have no overlapping valid data.")
+        return s1, s2
+
+    # 5. Crop both signals using the shared valid indices
+    sig1_cropped = s1[start_idx : end_idx + 1]
+    sig2_cropped = s2[start_idx : end_idx + 1]
+
+    print(f"Trimmed {start_idx/48000} seconds from the start.")
+    print(f"Trimmed {(len(s1) - (end_idx + 1))/48000} seconds from the end.")
+
+    return sig1_cropped, sig2_cropped
+
+def apply_highpass_filter(sig, cutoff_freq, fs=FS, order=4):
+    """
+    Removes low-frequency rumble and DC baseline drift from a signal.
+    Uses filtfilt to guarantee zero phase-shift (crucial for alignment).
+
+    cutoff_freq: Frequencies below this (in Hz) will be heavily reduced.
+                 40-50 Hz is standard to remove rumble without hurting voice or 200Hz tones.
+    """
+    # 1. Calculate the Nyquist frequency (half the sample rate)
+    nyquist = 0.5 * fs
+
+    # 2. Normalize the cutoff frequency for the digital filter
+    normal_cutoff = cutoff_freq / nyquist
+
+    # 3. Build a Butterworth high-pass filter
+    b, a = butter(order, normal_cutoff, btype='high', analog=False)
+
+    # 4. Apply the filter forwards and backwards to preserve exact phase alignment
+    filtered_sig = filtfilt(b, a, sig)
+
+    return filtered_sig
+
+def final_processing(sig1, sig2):
+    sig1, sig2 = trim_zeroes(sig1, sig2)
+
+    sig1 = apply_highpass_filter(sig1, cutoff_freq=15)
+    sig2 = apply_highpass_filter(sig2, cutoff_freq=15)
+
+    return sig1, sig2
+
+def record_two_signals(duration, fs=FS):
     if USE_VOICEMEETER:
         audio1, audio2 = record_two_mics_stereo_virtual_device(fs=fs, duration=duration)
     else:
-        audio1, audio2 = record_perfect_sync(fs=fs, duration=duration)
+        audio1, audio2 = record_two_mics_directly(fs=fs, duration=duration)
 
     sig1 = audio1.flatten()
     sig2 = audio2.flatten()
 
-    return sig1, sig2
+    sig1_matched, sig2_matched = final_processing(sig1, sig2)
+
+    return sig1_matched, sig2_matched
+
+def load_wav_signal(file_name):
+    """
+    Reads a WAV file and returns the signal and its sampling frequency.
+    Ensures the output is a 1D numpy array (mono) for mathematical operations.
+    """
+    # Read the audio data and sampling frequency
+    file_name = f"{OUTPUT_FOLDER}/{file_name}"
+    signal, fs = sf.read(file_name)
+
+    # Check if the signal is multi-channel (e.g., stereo)
+    if len(signal.shape) > 1:
+        print(f"Warning: '{file_name}' is multi-channel. Converting to mono...")
+        # Average the channels together to create a single 1D array
+        signal = np.mean(signal, axis=1)
+
+    return signal, fs
+
+def load_two_wav_signals(file_desc):
+    mic1_filename = f"{file_desc}_mic1.wav"
+    mic2_filename = f"{file_desc}_mic2.wav"
+
+    sig1, fs1 = load_wav_signal(mic1_filename)
+    sig2, fs2 = load_wav_signal(mic2_filename)
+
+    if fs1 != fs2:
+        raise ValueError(f"{mic1_filename} and {mic2_filename} have different sampling frequencies")
+
+    sig1_matched, sig2_matched = final_processing(sig1, sig2)
+
+    return sig1_matched, sig2_matched
