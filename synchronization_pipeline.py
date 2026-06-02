@@ -260,8 +260,17 @@ def main():
     filedesc2 = "recording_2026-05-31_21-20-30_40s"
 
     filedesc = filedesc2
-    load_and_run_synchronization_pipeline(filedesc)
-    #record_and_run_synchronization_pipeline()
+    #load_and_run_synchronization_pipeline(filedesc)
+    record_and_run_synchronization_pipeline(
+                total_duration=40,
+        f_played=200,
+        sine_perf_window=(0.0, 15.0),
+        sine_analysis_window=(0.0, 15.0),
+        clap_perf_window=(18.0, 25.0),
+        clap_analysis_window=(18.5, 24.5),
+        target_start_time=30,
+        fs=FS
+    )
 
 
 if __name__ == "__main__":
