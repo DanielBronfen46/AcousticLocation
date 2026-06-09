@@ -85,22 +85,27 @@ def calculate_points(mics: dict, time_difs: dict):
     pt3 = algebraic_intersection(mics[2], mics[0], mics[1], -d02, -d12)
     return [pt1, pt2, pt3]
 
-mics = {
-    0: np.array([-2.0, -5.0]),
-    1: np.array([6.0, 3.0]),
-    2: np.array([-7.0, 7.0])
-}
 
-time_difs = {
-    '01': 0.005,   # t0 - t1
-    '12': 0.0046,  # t1 - t2
-    '02': 0.0054   # t0 - t2
-}
+def main():
+    mics = {
+        0: np.array([-2.0, -5.0]),
+        1: np.array([6.0, 3.0]),
+        2: np.array([-7.0, 7.0])
+    }
 
-points = calculate_points(mics, time_difs)
+    time_difs = {
+        '01': 0.005,  # t0 - t1
+        '12': 0.0046,  # t1 - t2
+        '02': 0.0054  # t0 - t2
+    }
 
-est_intersection = np.mean(points, axis=0)
-print("--- Analytic Intersection Points ---")
-for i, pt in enumerate(points):
-    print(f"Intersection {i+1}: x = {pt[0]:.4f}, y = {pt[1]:.4f}")
-print(f"Estimated Source Location (Average): x = {est_intersection[0]:.4f}, y = {est_intersection[1]:.4f}")
+    points = calculate_points(mics, time_difs)
+
+    est_intersection = np.mean(points, axis=0)
+    print("--- Analytic Intersection Points ---")
+    for i, pt in enumerate(points):
+        print(f"Intersection {i + 1}: x = {pt[0]:.4f}, y = {pt[1]:.4f}")
+    print(f"Estimated Source Location (Average): x = {est_intersection[0]:.4f}, y = {est_intersection[1]:.4f}")
+
+if __name__ == '__main__':
+    main()

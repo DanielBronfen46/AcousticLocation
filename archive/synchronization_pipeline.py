@@ -7,11 +7,11 @@ import threading
 from scipy.interpolate import interp1d
 from scipy import signal
 from scipy.optimize import minimize_scalar
-from recording import convert_m4a_to_wav
+from recording import convert_m4a_to_wav, save_audio_file
 
 # Import all your perfected math and plotting functions
-from recording import record_two_signals, FS, OUTPUT_FOLDER, trim_zeroes, apply_highpass_filter, load_two_wav_signals
-from alignment import calculate_cross_correlation, align_signals, align_and_plot
+from recording import record_two_signals, FS, OUTPUT_FOLDER, trim_zeroes, apply_highpass_filter, load_two_usb_recordings
+from alignment import calculate_cross_correlation, align_signals_given_lag, align_and_plot
 from sine_wave_calibration import (  # Replace with the actual name of your file
     find_sample_frequency_diff_IQ,
     fix_frequency_and_phase,
@@ -46,40 +46,12 @@ def record_guided_session(clap_perf, sine_perf, target_start, total_duration, f_
     Runs the UI in a background thread to prevent Windows WDM-KS driver crashes,
     keeping the hardware audio streams safely on the Main Thread.
     """
-    clap_start, clap_end = clap_perf
-    sine_start, sine_end = sine_perf
-
-    def print_instructions():
-        print("\n🎙️  RECORDING STARTED! Follow the instructions:\n")
-
-        # 1. Wait for Sine Wave start
-        if sine_start > 0:
-            time.sleep(sine_start)
-
-        # 2. Sine Wave Action
-        print(f"--> [{sine_start}s - {sine_end}s] ACTION: Play {f_played}Hz sine wave!")
-        time.sleep(sine_end - sine_start)
-
-        # 3. Prepare for Claps
-        print(f"--> [{sine_end}s - {clap_start}s] PREPARE: Stop the sine wave. Get ready to clap...")
-        time.sleep(clap_start - sine_end)
-
-        # 4. Claps Action (Delta functions)
-        print(f"--> [{clap_start}s - {clap_end}s] ACTION: Create delta functions (Clap)!")
-        time.sleep(clap_end - clap_start)
-
-        # 5. Prepare for Target Audio
-        print(f"--> [{clap_end}s - {target_start}s] PREPARE: Stop clapping. Get ready to speak.")
-        time.sleep(target_start - clap_end)
-
-        # 6. Target Audio Action
-        print(f"--> [{target_start}s - {total_duration}s] ACTION: Recording the actual target audio...")
-        # The main thread blocks while recording, so we don't strictly need a final sleep here.
 
     # 1. Start the text UI in a background thread
     # Setting daemon=True ensures that if the hardware crashes, this thread dies instantly
     # instead of forcing you to wait 40 seconds for the countdown to finish.
-    ui_thread = threading.Thread(target=print_instructions)
+    ui_thread = threading.Thread(target=print_instructions,
+                                 args=(clap_perf, sine_perf, target_start, total_duration, f_played))
     ui_thread.daemon = True
     ui_thread.start()
 
@@ -92,42 +64,38 @@ def record_guided_session(clap_perf, sine_perf, target_start, total_duration, f_
 
     return sig1, sig2
 
-def optimize_subsample_delay(sig1, sig2, fs=FS):
-    """
-    Finds the exact fractional sub-sample delay between two frequency-matched signals.
-    Searches within a tiny +/- 2 sample window since they are already macro-aligned.
-    """
-    print("Starting 1D optimization for sub-sample delay...")
-    search_window_sec = 2.0 / fs  # +/- 2 samples
+def print_instructions(clap_perf, sine_perf, target_start, total_duration, f_played):
+    clap_start, clap_end = clap_perf
+    sine_start, sine_end = sine_perf
 
-    n_indices = np.arange(len(sig1))
-    original_m_indices = np.arange(len(sig2))
 
-    def alignment_cost(delta_t_test):
-        # Shift sig2 by a tiny fractional amount of time
-        m_indices = n_indices - (delta_t_test * fs)
+    print("\n🎙️  RECORDING STARTED! Follow the instructions:\n")
 
-        # Fast linear interpolation for the optimizer loop
-        interpolator = interp1d(original_m_indices, sig2, kind='linear', bounds_error=False, fill_value=0.0)
-        sig2_test = interpolator(m_indices)
+    # 1. Wait for Sine Wave start
+    if sine_start > 0:
+        time.sleep(sine_start)
 
-        # Maximize the dot product (minimize the negative)
-        return -np.sum(sig1 * sig2_test)
+    # 2. Sine Wave Action
+    print(f"--> [{sine_start}s - {sine_end}s] ACTION: Play {f_played}Hz sine wave!")
+    time.sleep(sine_end - sine_start)
 
-    result = minimize_scalar(
-        alignment_cost,
-        bounds=(-search_window_sec, search_window_sec),
-        method='bounded',
-        options={'xatol': 1e-7}
-    )
+    # 3. Prepare for Claps
+    print(f"--> [{sine_end}s - {clap_start}s] PREPARE: Stop the sine wave. Get ready to clap...")
+    time.sleep(clap_start - sine_end)
 
-    if result.success:
-        perfect_delta_t_s = result.x
-        print(f"Micro-delay found: {perfect_delta_t_s * 1000:.4f} ms")
-        return perfect_delta_t_s
-    else:
-        print("Optimization failed. Returning 0 delay.")
-        return 0.0
+    # 4. Claps Action (Delta functions)
+    print(f"--> [{clap_start}s - {clap_end}s] ACTION: Create delta functions (Clap)!")
+    time.sleep(clap_end - clap_start)
+
+    # 5. Prepare for Target Audio
+    print(f"--> [{clap_end}s - {target_start}s] PREPARE: Stop clapping. Get ready to speak.")
+    time.sleep(target_start - clap_end)
+
+    # 6. Target Audio Action
+    print(f"--> [{target_start}s - {total_duration}s] ACTION: Recording the actual target audio...")
+    time.sleep(total_duration - target_start)
+
+    print("--> STOP")
 
 def run_synchronization_pipeline(
         raw_sig1, raw_sig2,
@@ -158,7 +126,7 @@ def run_synchronization_pipeline(
     interpolator = interp1d(t_true_sig2, raw_sig2, kind='cubic', bounds_error=False, fill_value=0.0)
     sig2_freq_fixed = interpolator(t_target)
 
-    print("\n--- STAGE 2: MACRO TIME ALIGNMENT (CROSS-CORRELATION) ---")
+    print("\n--- STAGE 2: MACRO TIME ALIGNMENT (CROSS-CORRELATION AND AMPLITUDE) ---")
     if use_global_cross_correlation:
         print("Using global cross-correlation on the entire signals...")
         corr_target1 = raw_sig1
@@ -172,55 +140,38 @@ def run_synchronization_pipeline(
     _, _, lag_in_samples = align_and_plot(corr_target1, corr_target2)
 
     # Apply the integer macro shift to the full frequency-fixed arrays
-    sig1_macro, sig2_macro = align_signals(raw_sig1, sig2_freq_fixed, lag_in_samples)
-
-    print("\n--- STAGE 3: MICRO TIME ALIGNMENT (PERFECTING THE OFFSET) ---")
-    # Slice the newly aligned sine waves
-    sine1_macro = slice_audio(sig1_macro, sine_analysis_window[0], sine_analysis_window[1], fs)
-    sine2_macro = slice_audio(sig2_macro, sine_analysis_window[0], sine_analysis_window[1], fs)
-
-    # 1. Clean the rumble so the optimizer only looks at pure tones
-    sine1_clean = apply_highpass_filter(sine1_macro, 15.0, fs=fs)
-    sine2_clean = apply_highpass_filter(sine2_macro, 15.0, fs=fs)
-
-    # 2. Find the perfect sub-sample fractional delay
-    delta_t_s = optimize_subsample_delay(sine1_clean, sine2_clean, fs=fs)
+    sig1_macro, sig2_macro = align_signals_given_lag(raw_sig1, sig2_freq_fixed, lag_in_samples)
 
     # 3. Calculate the true amplitude scale factor on the clean sines
-    # We apply the delta_t_s (with 0.0 frequency drift) so the RMS is perfectly phase-aligned
-    _, sine2_micro_aligned = fix_frequency_and_phase(sine1_clean, sine2_clean, delta_fs=0.0, delta_t_s=delta_t_s, fs=fs)
-    _, scale_factor = match_amplitude(sine1_clean, sine2_micro_aligned, method='rms')
+    _, scale_factor = match_amplitude(sine1_raw, sine2_raw, method='rms')
 
-    print("\n--- STAGE 4: TARGET AUDIO PROCESSING ---")
+    print("\n--- STAGE 3: TARGET AUDIO PROCESSING ---")
     # Extract the final target audio from the macro-aligned arrays
-    target1 = slice_audio(sig1_macro, target_start_time, None, fs)
+    target1_fixed = slice_audio(sig1_macro, target_start_time, None, fs)
     target2 = slice_audio(sig2_macro, target_start_time, None, fs)
 
-    # Apply the final sub-sample micro-delay (Pass 0.0 for delta_fs because we fixed it globally in Stage 1!)
-    target1_fixed, target2_fixed = fix_frequency_and_phase(target1, target2, delta_fs=0.0, delta_t_s=delta_t_s, fs=fs)
-
     # Scale amplitude
-    target2_scaled = target2_fixed * scale_factor
+    target2_fixed = target2 * scale_factor
 
     # Final Validation and Save
-    plot_both_signals(target1_fixed, target2_scaled, title="Final Synced Target Audio")
-    plot_xy_signals(target1_fixed, target2_scaled, title="XY Plot: Target Audio Phase Verification")
+    plot_both_signals(target1_fixed, target2_fixed, title="Final Synced Target Audio")
+    plot_xy_signals(target1_fixed, target2_fixed, title="XY Plot: Target Audio Phase Verification")
 
     os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-    sf.write(f"{OUTPUT_FOLDER}/FINAL_mic1.wav", target1_fixed, fs)
-    sf.write(f"{OUTPUT_FOLDER}/FINAL_mic2.wav", target2_scaled, fs)
+    save_audio_file(target1_fixed, prefix="FINAL", suffix="mic1", fs=fs)
+    save_audio_file(target2_fixed, prefix="FINAL", suffix="mic2", fs=fs)
     print("\n🎉 Master Flow Complete!")
 
-    return target1_fixed, target2_scaled
+    return target1_fixed, target2_fixed
 
 def record_and_run_synchronization_pipeline(
-        total_duration=40,
-        f_played=200,
-        sine_perf_window=(0.0, 15.0),
-        sine_analysis_window=(0.0, 15.0),
-        clap_perf_window=(18.0, 25.0),
-        clap_analysis_window=(18.5, 24.5),
-        target_start_time=30,
+        total_duration,
+        f_played,
+        sine_perf_window,
+        sine_analysis_window,
+        clap_perf_window,
+        clap_analysis_window,
+        target_start_time,
         fs=FS
 ):
     # Step A: Record the raw master file
@@ -251,7 +202,7 @@ def load_and_run_synchronization_pipeline(
                                           ):
 
     # Step A: Record the raw master file
-    raw_sig1, raw_sig2 = load_two_wav_signals(filedesc)
+    raw_sig1, raw_sig2 = load_two_usb_recordings(filedesc)
 
     run_synchronization_pipeline(
         raw_sig1, raw_sig2,
@@ -269,26 +220,38 @@ def main():
     filedesc3 = "recording_2026-06-02_10-24-45_40s"
     filedesc4 = "recording_outside1_40s"
     
-    filedesc = "telephone"
+    filedesc = "telephone3"
+
+    total_duration = 40
+    f_played = 200
+    sine_perf_window = (0.0, 18.0)
+    sine_analysis_window = (3.0, 15.0)
+    clap_perf_window = (20.0, 35.0)
+    clap_analysis_window = (21.0, 34.0)
+    target_start_time = 35
 
 
     load_and_run_synchronization_pipeline(filedesc,
-                                          sine_analysis_window=(5, 18.0),
-        clap_analysis_window=(22.5, 39.5),
-       target_start_time=39.5)
+                                          sine_analysis_window=sine_analysis_window,
+        clap_analysis_window=clap_analysis_window,
+       target_start_time=target_start_time)
+
     # record_and_run_synchronization_pipeline(
-    #             total_duration=40,
-    #     f_played=200,        sine_perf_window=(0.0, 15.0),
-    #     sine_analysis_window=(0.0, 15.0),
-    #     clap_perf_window=(18.0, 25.0),
-    #     clap_analysis_window=(18.5, 24.5),
-    #     target_start_time=30,
+    #             total_duration=total_duration,
+    #     f_played=f_played,
+    #     sine_perf_window=sine_perf_window,
+    #     sine_analysis_window=sine_analysis_window,
+    #     clap_perf_window=clap_perf_window,
+    #     clap_analysis_window=clap_analysis_window,
+    #     target_start_time=target_start_time,
     #     fs=FS
     # )
 
+    #print_instructions(clap_perf_window, sine_perf_window, target_start_time, total_duration, f_played)
+
 
 if __name__ == "__main__":
-    # convert_m4a_to_wav("telephone_mic1.m4a", "telephone_mic1.wav",fs=48000)
-    # convert_m4a_to_wav("telephone_mic2.m4a", "telephone_mic2.wav",fs=48000)
+    convert_m4a_to_wav("telephone3_mic1.m4a", "telephone3_mic1.wav",fs=48000)
+    convert_m4a_to_wav("telephone3_mic2.m4a", "telephone3_mic2.wav",fs=48000)
     main()
 

@@ -4,7 +4,7 @@ from scipy.optimize import minimize_scalar
 from scipy.signal import butter, filtfilt, hilbert
 
 from alignment import plot_both_signals, plot_both_signals_around_max, compare_two_signals_at_multiple_points
-from recording import record_two_signals, FS, load_two_wav_signals, trim_zeroes
+from recording import record_two_signals, FS, load_two_usb_recordings, trim_zeroes
 import matplotlib.pyplot as plt
 
 
@@ -288,7 +288,7 @@ def record_sine_signals_and_fix(f_played, duration):
     calibrate_sine_waves_and_plot(sig1, sig2, f_played)
 
 def load_sine_signals_and_fix(f_played, file_desc):
-    sig1, sig2 = load_two_wav_signals(file_desc)
+    sig1, sig2 = load_two_usb_recordings(file_desc)
 
     calibrate_sine_waves_and_plot(sig1, sig2, f_played)
 
