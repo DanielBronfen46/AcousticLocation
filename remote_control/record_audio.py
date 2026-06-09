@@ -254,4 +254,4 @@ def record_audio(duration, mic_indexes):
 
 
 if __name__ == "__main__":
-    record_audio(duration=5, mic_indexes=[1, 3])
+    record_audio(duration=30, mic_indexes=[1, 3])
