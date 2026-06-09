@@ -13,7 +13,6 @@ from scipy.signal import butter, filtfilt
 # --- Configuration ---
 FS = 48000  # Sample rate (44100 Hz is standard for audio)
 OUTPUT_FOLDER = "mic_output"
-USE_VOICEMEETER = False
 
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
@@ -38,8 +37,8 @@ def record_asio(duration, fs=FS):
     audio2 = quad_audio[:, 2]
 
     # Save them
-    save_mic_output(audio1, "asio", "mic1")
-    save_mic_output(audio2, "asio", "mic2")
+    save_audio_file(audio1, "asio", "mic1")
+    save_audio_file(audio2, "asio", "mic2")
 
     print("Recording complete! You now have both mics.")
     return audio1, audio2
@@ -91,8 +90,8 @@ def record_two_mics_stereo_virtual_device(duration, fs=FS):
     audio2 = stereo_audio[:, 1]
 
     # Save to WAV files
-    save_mic_output(audio1, "voicemeeter", "mic1")
-    save_mic_output(audio2, "voicemeeter", "mic2")
+    save_audio_file(audio1, "voicemeeter", "mic1")
+    save_audio_file(audio2, "voicemeeter", "mic2")
 
     return audio1, audio2
 
@@ -148,12 +147,12 @@ def record_two_mics_directly(duration, fs=FS):
         audio2 = audio2[:, 0]
 
     # Save to WAV files (sf.write naturally saves 1D arrays as mono files)
-    save_mic_output(audio1, "recording", f"{duration}s_mic1")
-    save_mic_output(audio2, "recording", f"{duration}s_mic2")
+    save_audio_file(audio1, "recording", f"{duration}s_mic1")
+    save_audio_file(audio2, "recording", f"{duration}s_mic2")
 
     return audio1, audio2
 
-def save_mic_output(audio, prefix, suffix="", fs=FS):
+def save_audio_file(audio, prefix, suffix="", fs=FS):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     file_name = f'{OUTPUT_FOLDER}/{prefix}_{timestamp}_{suffix}.wav'
     sf.write(file_name, audio, fs)
@@ -246,7 +245,7 @@ def match_signal_length(sig1, sig2):
 
     return sig1_matched, sig2_matched
 
-def trim_zeroes(sig1, sig2):
+def trim_zeroes(sig1, sig2, fs=FS):
     """
     Finds the exact start and end of the valid data in both signals
     (ignoring 0.0 padding) and crops BOTH signals to the shared overlapping window.
@@ -282,10 +281,58 @@ def trim_zeroes(sig1, sig2):
     sig1_cropped = s1[start_idx : end_idx + 1]
     sig2_cropped = s2[start_idx : end_idx + 1]
 
-    print(f"Trimmed {start_idx/48000} seconds from the start.")
-    print(f"Trimmed {(len(s1) - (end_idx + 1))/48000} seconds from the end.")
+    print(f"Trimmed {start_idx/fs} seconds from the start.")
+    print(f"Trimmed {(len(s1) - (end_idx + 1))/fs} seconds from the end.")
 
     return sig1_cropped, sig2_cropped
+
+def trim_zeroes_n(signals, fs=FS):
+    """
+    Finds the exact start and end of the valid data across N signals
+    (ignoring 0.0 padding) and crops ALL signals to the shared overlapping window.
+    Safely handles length mismatches and zero-padding on any signal.
+    """
+    if not signals:
+        return []
+
+    # 1. Guarantee a 1:1 time mapping by truncating all to the shortest length
+    # This replaces the 2-signal match_signal_length function
+    min_len = min(len(sig) for sig in signals)
+    matched_signals = [sig[:min_len] for sig in signals]
+
+    starts = []
+    ends = []
+
+    # 2 & 3. Find the valid indices and independent bounds for each signal
+    for i, sig in enumerate(matched_signals):
+        valid_indices = np.where(sig != 0.0)[0]
+
+        # Failsafe: if any array is completely empty/zeros
+        if len(valid_indices) == 0:
+            print(f"Warning: Signal {i} is entirely zeros. Aborting trim.")
+            return matched_signals
+
+        starts.append(valid_indices[0])
+        ends.append(valid_indices[-1])
+
+    # 4. Calculate the shared overlapping window
+    # Start when ALL have started, stop when ANY stops
+    start_idx = max(starts)
+    end_idx = min(ends)
+
+    # Failsafe: if they somehow don't overlap at all
+    if start_idx > end_idx:
+        print("Warning: Signals have no overlapping valid data.")
+        return matched_signals
+
+    # 5. Crop all signals using the shared valid indices
+    cropped_signals = [sig[start_idx : end_idx + 1] for sig in matched_signals]
+
+    print(f"Trimmed {start_idx/fs:.5f} seconds from the start.")
+    print(f"Trimmed {(min_len - (end_idx + 1))/fs:.5f} seconds from the end.")
+
+    return cropped_signals
+
 
 def apply_highpass_filter(sig, cutoff_freq, fs=FS, order=4):
     """
@@ -318,10 +365,7 @@ def final_processing(sig1, sig2):
     return sig1, sig2
 
 def record_two_signals(duration, fs=FS):
-    if USE_VOICEMEETER:
-        audio1, audio2 = record_two_mics_stereo_virtual_device(fs=fs, duration=duration)
-    else:
-        audio1, audio2 = record_two_mics_directly(fs=fs, duration=duration)
+    audio1, audio2 = record_two_mics_directly(fs=fs, duration=duration)
 
     sig1 = audio1.flatten()
     sig2 = audio2.flatten()
@@ -347,7 +391,7 @@ def load_wav_signal(file_name):
 
     return signal, fs
 
-def load_two_wav_signals(file_desc):
+def load_two_usb_recordings(file_desc):
     mic1_filename = f"{file_desc}_mic1.wav"
     mic2_filename = f"{file_desc}_mic2.wav"
 
@@ -361,3 +405,54 @@ def load_two_wav_signals(file_desc):
     sig1_matched, sig2_matched = final_processing(sig1, sig2)
 
     return sig1_matched, sig2_matched
+
+def load_two_wav_files(file_desc):
+    mic1_filename = f"{file_desc}_mic1.wav"
+    mic2_filename = f"{file_desc}_mic2.wav"
+
+    sig1, fs1 = load_wav_signal(mic1_filename)
+    sig2, fs2 = load_wav_signal(mic2_filename)
+
+    if fs1 != fs2:
+        print(f"Error: Sampling frequencies do not match ({fs1} Hz vs {fs2} Hz).")
+        raise ValueError(f"{mic1_filename} and {mic2_filename} have different sampling frequencies")
+
+    return sig1, sig2
+
+def load_n_wav_files(file_desc, n=None):
+    """
+    Loads N wav files following the naming convention '{file_desc}_micX.wav'.
+    If 'n' is not provided, it will automatically detect and load all matching files.
+    """
+    signals = []
+    base_fs = None
+    i = 1
+
+    while True:
+        # If n is specified, stop when we exceed n
+        if n is not None and i > n:
+            break
+
+        mic_filename = f"{file_desc}_mic{i}.wav"
+
+        # If n is NOT specified, stop when we can't find the next consecutive file
+        if n is None and not os.path.exists(mic_filename):
+            if i == 1:
+                raise FileNotFoundError(f"Error: Could not find the starting file '{mic_filename}'")
+            break
+
+        # Load the signal (assuming load_wav_signal is imported/available)
+        sig, fs = load_wav_signal(mic_filename)
+
+        # Ensure all sampling frequencies perfectly match the first file
+        if base_fs is None:
+            base_fs = fs
+        elif fs != base_fs:
+            print(f"Error: Sampling frequency mismatch at {mic_filename} ({fs} Hz vs base {base_fs} Hz).")
+            raise ValueError("All microphone files must have the exact same sampling frequency.")
+
+        signals.append(sig)
+        i += 1
+
+    print(f"Successfully loaded {len(signals)} microphone signals for '{file_desc}'.")
+    return signals

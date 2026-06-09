@@ -87,32 +87,42 @@ def calculate_n_mic_points(mics: dict, t_arrivals: dict):
         for pt in [pt1, pt2, pt3]:
             if pt is not None:
                 all_points.append(pt)
-                
+
+    total_triplets = len(triplets)
+    total_attempts = total_triplets * 3  # 3 intersection calculations per triplet
+    successful_points = len(all_points)
+
+    print(f"Found {successful_points} valid intersections out of {total_attempts} attempted calculations. Success rate of {successful_points/total_attempts*100:.1f}%")
+
     return all_points
 
-# --- Execution Example with 4 Mics ---
+def main():
+    # --- Execution Example with 4 Mics ---
 
-mics = {
-    0: np.array([-2.0, -5.0]),
-    1: np.array([6.0, 3.0]),
-    2: np.array([-7.0, 7.0]),
-    3: np.array([5.0, -4.0]) # Added a 4th mic!
-}
+    mics = {
+        0: np.array([-2.0, -5.0]),
+        1: np.array([6.0, 3.0]),
+        2: np.array([-7.0, 7.0]),
+        3: np.array([5.0, -4.0])  # Added a 4th mic!
+    }
 
-# Instead of pairs, we just supply the absolute (or relative) arrival time 
-# of the sound at each microphone. 
-# (These specific times were simulated to originate from coordinate [0, 0])
-t_arrivals = {
-    0: 0.01570,
-    1: 0.01955,
-    2: 0.02886,
-    3: 0.01866 
-}
+    # Instead of pairs, we just supply the absolute (or relative) arrival time
+    # of the sound at each microphone.
+    # (These specific times were simulated to originate from coordinate [0, 0])
+    t_arrivals = {
+        0: 0.01570,
+        1: 0.01955,
+        2: 0.02886,
+        3: 0.01866
+    }
 
-points = calculate_n_mic_points(mics, t_arrivals)
+    points = calculate_n_mic_points(mics, t_arrivals)
 
-# Calculate the overall centroid
-est_intersection = np.mean(points, axis=0)
+    # Calculate the overall centroid
+    est_intersection = np.mean(points, axis=0)
 
-print(f"--- Processed {len(points)} valid intersection points ---")
-print(f"Estimated Source Location (Average): x = {est_intersection[0]:.4f}, y = {est_intersection[1]:.4f}")
+    print(f"--- Processed {len(points)} valid intersection points ---")
+    print(f"Estimated Source Location (Average): x = {est_intersection[0]:.4f}, y = {est_intersection[1]:.4f}")
+
+if __name__ == '__main__':
+    main()
