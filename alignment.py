@@ -425,7 +425,9 @@ def load_and_align(file_desc):
 
 
 def main():
-    load_and_align("telephone2")
+    filedesc1 = "20260609_173250"
+    filedesc2 = "20260609_180357"
+    load_and_align(filedesc2)
 
 if __name__ == "__main__":
     main()

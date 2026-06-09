@@ -1,6 +1,7 @@
 import numpy as np
 
-from alignment import calculate_cross_correlation, convert_samples_to_seconds
+from alignment import calculate_cross_correlation, convert_samples_to_seconds, plot_both_signals_around_max, \
+    plot_n_signals_around_max, plot_two_signals_around_point, plot_both_signals
 from locate.find_distance import calculate_x
 from locate.n_mics_intersection import calculate_n_mic_points
 from recording import FS, load_n_wav_files, load_two_wav_files
@@ -20,7 +21,7 @@ def get_aligned_target_signals(signals, calib_range, target_range, fs=FS):
 
     # Extract the calibration window
     calib_signals = [sig[calib_start:calib_end] for sig in signals]
-
+    plot_n_signals_around_max(calib_signals)
     # Calculate calibration lags relative to Mic 0
     calib_lags = [0] * n
     for i in range(1, n):
@@ -39,6 +40,7 @@ def get_aligned_target_signals(signals, calib_range, target_range, fs=FS):
     # Truncate ends so they all match the shortest array length
     min_len = min(len(sig) for sig in aligned_signals)
     aligned_signals = [sig[:min_len] for sig in aligned_signals]
+    plot_n_signals_around_max(aligned_signals)
 
     print(f"--- Phase 1: Hardware Aligned ({a}s to {b}s) ---")
 
@@ -54,7 +56,7 @@ def get_aligned_target_signals(signals, calib_range, target_range, fs=FS):
 
     # Extract the target window from the ALIGNED signals
     target_signals = [sig[target_start:target_end] for sig in aligned_signals]
-
+    plot_n_signals_around_max(target_signals)
     return target_signals
 
 def get_t_arrivals_from_audio(signals, calib_range, target_range, fs=FS):
@@ -134,6 +136,8 @@ def find_x_from_audio(sig1, sig2, d, y, fs=FS):
     lag_samples = calculate_cross_correlation(sig1, sig2, fs=fs, verbose=True)
     t = convert_samples_to_seconds(lag_samples, fs)
 
+    plot_both_signals(sig1, sig2, title="Target Signals")
+    plot_both_signals_around_max(sig1, sig2)
     print(f"Mic Distance (d): {d} m")
     print(f"Target Y (y): {y} m")
     print(f"Measured Delay (t): {t:.6f} seconds")
@@ -155,14 +159,20 @@ def find_x_from_audio(sig1, sig2, d, y, fs=FS):
         return None
 
 def main():
-    filedesc = ""
-    signals = load_two_wav_files(filedesc)
+    filedesc1 = "20260609_173250"
+    filedesc2 = "20260609_180357"
+
+    signals = load_two_wav_files(filedesc2)
 
     calib_range = (0, 10)
-    target_range = (12, 16)
-    d = 1
-    y = 0
+    target_range = (26, 29)
+    d = 1.83
+    y = 0.1
 
+    #true 63
     target1, target2 = get_aligned_target_signals(signals, calib_range, target_range, fs=FS)
 
     find_x_from_audio(target1, target2, d, y, fs=48000)
+
+if __name__ == "__main__":
+    main()
