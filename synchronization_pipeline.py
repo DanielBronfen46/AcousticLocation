@@ -7,6 +7,7 @@ import threading
 from scipy.interpolate import interp1d
 from scipy import signal
 from scipy.optimize import minimize_scalar
+from recording import convert_m4a_to_wav
 
 # Import all your perfected math and plotting functions
 from recording import record_two_signals, FS, OUTPUT_FOLDER, trim_zeroes, apply_highpass_filter, load_two_wav_signals
@@ -147,6 +148,7 @@ def run_synchronization_pipeline(
     # Fit the sines to find the initial frequency offset.
     _, _, delta_fs_initial, _, _ = calibrate_sine_waves_and_plot(sine1_raw, sine2_raw, f_played, fs)
 
+    delta_fs_initial = delta_fs_initial
     # Apply the global frequency fix to the entire Mic 2 array
     print(f"\nResampling global Mic 2 array to correct {delta_fs_initial:.5f} Hz drift...")
     fs2_effective = fs + delta_fs_initial
@@ -214,10 +216,10 @@ def run_synchronization_pipeline(
 def record_and_run_synchronization_pipeline(
         total_duration=40,
         f_played=200,
-        clap_perf_window=(0.0, 5.0),
-        clap_analysis_window=(0.0, 5.0),
-        sine_perf_window=(10.0, 25.0),
-        sine_analysis_window=(10.5, 24.5),
+        sine_perf_window=(0.0, 15.0),
+        sine_analysis_window=(0.0, 15.0),
+        clap_perf_window=(18.0, 25.0),
+        clap_analysis_window=(18.5, 24.5),
         target_start_time=30,
         fs=FS
 ):
@@ -240,11 +242,12 @@ def record_and_run_synchronization_pipeline(
         fs=FS
     )
 
-def load_and_run_synchronization_pipeline(filedesc,
-                                          f_played=200,
-                                          clap_analysis_window=(0.0, 5.0),
-                                          sine_analysis_window=(10.5, 24.5),
-                                          target_start_time=30,
+def load_and_run_synchronization_pipeline(
+        filedesc,    #             total_duration=40,
+        f_played=200,
+        sine_analysis_window=(0.0, 15.0),
+        clap_analysis_window=(18.5, 24.5),
+        target_start_time=30
                                           ):
 
     # Step A: Record the raw master file
@@ -263,20 +266,29 @@ def load_and_run_synchronization_pipeline(filedesc,
 def main():
     filedesc1 = "recording_2026-05-31_19-19-30_40s"
     filedesc2 = "recording_2026-05-31_21-20-30_40s"
+    filedesc3 = "recording_2026-06-02_10-24-45_40s"
+    filedesc4 = "recording_outside1_40s"
+    
+    filedesc = "telephone"
 
-    filedesc = filedesc2
-    #load_and_run_synchronization_pipeline(filedesc)
-    record_and_run_synchronization_pipeline(
-                total_duration=40,
-        f_played=200,
-        sine_perf_window=(0.0, 15.0),
-        sine_analysis_window=(0.0, 15.0),
-        clap_perf_window=(18.0, 25.0),
-        clap_analysis_window=(18.5, 24.5),
-        target_start_time=30,
-        fs=FS
-    )
+
+    load_and_run_synchronization_pipeline(filedesc,
+                                          sine_analysis_window=(5, 18.0),
+        clap_analysis_window=(22.5, 39.5),
+       target_start_time=39.5)
+    # record_and_run_synchronization_pipeline(
+    #             total_duration=40,
+    #     f_played=200,        sine_perf_window=(0.0, 15.0),
+    #     sine_analysis_window=(0.0, 15.0),
+    #     clap_perf_window=(18.0, 25.0),
+    #     clap_analysis_window=(18.5, 24.5),
+    #     target_start_time=30,
+    #     fs=FS
+    # )
 
 
 if __name__ == "__main__":
+    # convert_m4a_to_wav("telephone_mic1.m4a", "telephone_mic1.wav",fs=48000)
+    # convert_m4a_to_wav("telephone_mic2.m4a", "telephone_mic2.wav",fs=48000)
     main()
+

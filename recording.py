@@ -1,5 +1,7 @@
 import os
-
+import subprocess
+import shutil
+from pathlib import Path
 
 from datetime import datetime
 
@@ -158,6 +160,85 @@ def save_mic_output(audio, prefix, suffix="", fs=FS):
     print(f"Saved {file_name}")
 
 
+def find_ffmpeg_executable():
+    """Return the path to an FFmpeg executable, searching PATH and common Windows install locations."""
+    ffmpeg_exe = shutil.which('ffmpeg')
+    if ffmpeg_exe:
+        return ffmpeg_exe
+
+    env_path = os.environ.get('FFMPEG_PATH')
+    if env_path and Path(env_path).exists():
+        return env_path
+
+    local_appdata = Path(os.environ.get('LOCALAPPDATA', ''))
+    search_bases = []
+    if local_appdata.exists():
+        search_bases.extend([
+            local_appdata / 'Microsoft' / 'WindowsApps',
+            local_appdata / 'Microsoft' / 'WinGet' / 'Packages'
+        ])
+
+    for base in search_bases:
+        if base.exists():
+            for candidate in base.rglob('ffmpeg.exe'):
+                return str(candidate)
+
+    for prog_root in [Path('C:/Program Files/ffmpeg'), Path('C:/Program Files (x86)/ffmpeg')]:
+        candidate = prog_root / 'bin' / 'ffmpeg.exe'
+        if candidate.exists():
+            return str(candidate)
+
+    return None
+
+
+def convert_m4a_to_wav(input_m4a_path, output_wav_path=None, duration_sec=None, fs=None):
+    """Convert an M4A file to WAV while preserving original sample rate and duration by default."""
+    input_path = Path(input_m4a_path)
+    if not input_path.is_absolute():
+        input_path = Path(OUTPUT_FOLDER) / input_path
+
+    if not input_path.exists():
+        raise FileNotFoundError(f"Input file not found: {input_path}")
+
+    if output_wav_path is None:
+        output_path = input_path.with_suffix('.wav')
+    else:
+        output_path = Path(output_wav_path)
+        if not output_path.is_absolute():
+            output_path = Path(OUTPUT_FOLDER) / output_path
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ffmpeg_exe = find_ffmpeg_executable()
+    if ffmpeg_exe is None:
+        raise RuntimeError(
+            "FFmpeg is required to convert m4a to wav. Install FFmpeg and ensure it is on your PATH, or set FFMPEG_PATH."
+        )
+
+    command = [ffmpeg_exe, '-y', '-i', str(input_path)]
+    if duration_sec is not None:
+        command += ['-t', str(duration_sec)]
+    if fs is not None:
+        command += ['-ar', str(fs)]
+    command += [str(output_path)]
+
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"FFmpeg conversion failed:\n{result.stderr.strip()}"
+        )
+
+    info = []
+    if duration_sec is not None:
+        info.append(f"{duration_sec}s")
+    if fs is not None:
+        info.append(f"{fs} Hz")
+    info_str = f" ({', '.join(info)})" if info else ""
+
+    print(f"Converted '{input_path}' -> '{output_path}'{info_str}")
+    return str(output_path)
+
+
 def match_signal_length(sig1, sig2):
     min_len = min(len(sig1), len(sig2))
     sig1_matched = sig1[:min_len]
@@ -274,6 +355,7 @@ def load_two_wav_signals(file_desc):
     sig2, fs2 = load_wav_signal(mic2_filename)
 
     if fs1 != fs2:
+        print(f"Error: Sampling frequencies do not match ({fs1} Hz vs {fs2} Hz).")
         raise ValueError(f"{mic1_filename} and {mic2_filename} have different sampling frequencies")
 
     sig1_matched, sig2_matched = final_processing(sig1, sig2)

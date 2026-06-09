@@ -296,8 +296,8 @@ def load_sine_signals_and_fix(f_played, file_desc):
 def main():
     file_desc = "recording_2026-05-31_12-45-41_200hz_20s"
     #file_desc = "recording_2026-05-31_10-41-31_200hz_5s"
-    #record_sine_signals_and_fix(f_played=200, duration=20)
-    load_sine_signals_and_fix(f_played=200, file_desc=file_desc)
+    record_sine_signals_and_fix(f_played=200, duration=40)
+    #load_sine_signals_and_fix(f_played=200, file_desc=file_desc)
 
 if __name__ == "__main__":
     main()
