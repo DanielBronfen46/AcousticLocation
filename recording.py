@@ -412,7 +412,7 @@ def load_two_wav_files(file_desc):
 
     sig1, fs1 = load_wav_signal(mic1_filename)
     sig2, fs2 = load_wav_signal(mic2_filename)
-
+    print(fs1)
     if fs1 != fs2:
         print(f"Error: Sampling frequencies do not match ({fs1} Hz vs {fs2} Hz).")
         raise ValueError(f"{mic1_filename} and {mic2_filename} have different sampling frequencies")

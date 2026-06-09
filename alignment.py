@@ -308,6 +308,7 @@ def align_signals_given_lag(sig1, sig2, lag_in_samples):
 def align_and_plot(sig1, sig2):
     lag_in_samples = calculate_cross_correlation(sig1, sig2)
 
+    lag_in_samples -= int((0.004 - 0.0018) * 44100)
     aligned1, aligned2 = align_signals_given_lag(sig1, sig2, lag_in_samples)
 
     plot_both_signals(sig1, sig2, title="Before Alignment")
