@@ -1,16 +1,12 @@
 import numpy as np
 
 from alignment import calculate_cross_correlation, convert_samples_to_seconds
+from locate.find_distance import calculate_x
 from locate.n_mics_intersection import calculate_n_mic_points
-from recording import FS, load_n_wav_files
+from recording import FS, load_n_wav_files, load_two_wav_files
 
 
-def get_t_arrivals_from_audio(signals, calib_range, target_range, fs=FS):
-    """
-    1. Uses a calibration sound (mics clustered) to align hardware start times.
-    2. Uses a target sound (mics spread out) to find the acoustic time-of-flight.
-    3. Returns a t_arrivals dictionary perfectly formatted for TDOA math.
-    """
+def get_aligned_target_signals(signals, calib_range, target_range, fs=FS):
     n = len(signals)
     if n < 2:
         raise ValueError("Need at least 2 signals to compare.")
@@ -59,10 +55,21 @@ def get_t_arrivals_from_audio(signals, calib_range, target_range, fs=FS):
     # Extract the target window from the ALIGNED signals
     target_signals = [sig[target_start:target_end] for sig in aligned_signals]
 
+    return target_signals
+
+def get_t_arrivals_from_audio(signals, calib_range, target_range, fs=FS):
+    """
+    1. Uses a calibration sound (mics clustered) to align hardware start times.
+    2. Uses a target sound (mics spread out) to find the acoustic time-of-flight.
+    3. Returns a t_arrivals dictionary perfectly formatted for TDOA math.
+    """
+    n = len(signals)
+    target_signals = get_aligned_target_signals(signals, calib_range, target_range, fs=fs)
+
     # Mic 0 is our reference point in time
     t_arrivals = {0: 0.0}
 
-    print(f"\n--- Phase 2: Acoustic Arrival Times ({c}s to {d}s) ---")
+    print(f"\n--- Phase 2: Acoustic Arrival Times ---")
     print("Mic 0: 0.000000s (Reference)")
 
     for i in range(1, n):
@@ -76,7 +83,7 @@ def get_t_arrivals_from_audio(signals, calib_range, target_range, fs=FS):
 
         print(f"Mic {i}: {delay_sec:.6f}s")
 
-    return t_arrivals, aligned_signals
+    return t_arrivals
 
 
 def locate_source_from_audio(file_desc, mics_dict, calib_range, target_range, n=None, fs=48000):
@@ -98,7 +105,7 @@ def locate_source_from_audio(file_desc, mics_dict, calib_range, target_range, n=
         raise ValueError(f"Loaded {len(signals)} audio files, but provided {len(mics_dict)} mic coordinates.")
 
     # 2. Sync hardware and extract acoustic arrival times
-    t_arrivals, synced_signals = get_t_arrivals_from_audio(signals, calib_range, target_range, fs=fs)
+    t_arrivals = get_t_arrivals_from_audio(signals, calib_range, target_range, fs=fs)
 
 
     # 3. Calculate intersections using your TDOA math solver
@@ -110,9 +117,52 @@ def locate_source_from_audio(file_desc, mics_dict, calib_range, target_range, n=
         print(f"\n--- RESULTS ---")
         print(f"Processed {len(points)} valid intersection points.")
         print(f"Estimated Source Location: x = {est_intersection[0]:.4f}, y = {est_intersection[1]:.4f}")
-        return est_intersection, points, synced_signals
+        return est_intersection, points
     else:
         print("\n--- RESULTS ---")
         print(
             "FAILED: Could not find any valid intersecting curves. Ensure mics are physically positioned correctly relative to the math model.")
-        return None, None, synced_signals
+        return None, None
+
+
+def find_x_from_audio(sig1, sig2, d, y, fs=FS):
+    """
+    Loads two mic files, finds the acoustic delay, and calculates the X coordinate.
+    """
+
+    # 2. Find the time delay (t)
+    lag_samples = calculate_cross_correlation(sig1, sig2, fs=fs, verbose=True)
+    t = convert_samples_to_seconds(lag_samples, fs)
+
+    print(f"Mic Distance (d): {d} m")
+    print(f"Target Y (y): {y} m")
+    print(f"Measured Delay (t): {t:.6f} seconds")
+
+    if t > 0:
+        print("-> Mic 1 heard the sound first.")
+    elif t < 0:
+        print("-> Mic 2 heard the sound first.")
+    else:
+        print("-> Both mics heard the sound simultaneously.")
+
+    # 3. Calculate X
+    try:
+        calculated_x = calculate_x(t, d, y)
+        print(f"\nCalculated X Coordinate: {calculated_x:.4f} m")
+        return calculated_x
+    except ValueError as e:
+        print(f"\nMath Error: {e}")
+        return None
+
+def main():
+    filedesc = ""
+    signals = load_two_wav_files(filedesc)
+
+    calib_range = (0, 10)
+    target_range = (12, 16)
+    d = 1
+    y = 0
+
+    target1, target2 = get_aligned_target_signals(signals, calib_range, target_range, fs=FS)
+
+    find_x_from_audio(target1, target2, d, y, fs=48000)
