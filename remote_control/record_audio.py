@@ -18,9 +18,9 @@ HARDWARE_REGISTRY = {
     "sma505f": "Backup_Bronfonfon" # Samsung Galaxy A50
 }
 MIC_INDEX_MAP = {
-    "Amibar": "0",
-    "Bronfonfon": "1",
-    "Backup_Bronfonfon": "2"
+    "Amibar": "1",
+    "Bronfonfon": "2",
+    "Backup_Bronfonfon": "3"
 }
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 VIDEO_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "video_recordings"))
@@ -225,10 +225,33 @@ def capture_by_alias(devices=None):
         
     print(f"\n[COMPLETE] Script operations successfully wrapped up.")
 
+
+def record_audio(duration, mic_indexes):
+    """
+    Wrapper around capture_by_alias.
+
+    Args:
+        duration: Recording duration in seconds for each selected mic.
+        mic_indexes: Iterable of mic indexes (0, 1, 2) to record.
+    """
+    if duration is None or duration <= 0:
+        raise ValueError("duration must be a positive number of seconds")
+
+    index_to_alias = {value: alias for alias, value in MIC_INDEX_MAP.items()}
+    requested_devices = []
+
+    for raw_index in mic_indexes:
+        index = str(raw_index)
+        alias = index_to_alias.get(index)
+        if alias is None:
+            raise ValueError(f"Unknown mic index: {raw_index}")
+        requested_devices.append((alias, duration))
+
+    if not requested_devices:
+        raise ValueError("mic_indexes must contain at least one valid mic index")
+
+    capture_by_alias(devices=requested_devices)
+
+
 if __name__ == "__main__":
-    # Test execution matching your exact preferred layout!
-    capture_by_alias(devices=[
-        ("Amibar", 5), 
-        ("Bronfonfon", 5),
-        ("Backup_Bronfonfon", 5)
-    ])
+    record_audio(duration=5, mic_indexes=[1, 3])
