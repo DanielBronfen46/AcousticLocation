@@ -1,7 +1,7 @@
 import numpy as np
 
 from alignment import calculate_cross_correlation, convert_samples_to_seconds, plot_both_signals_around_max, \
-    plot_n_signals_around_max, plot_two_signals_around_point, plot_both_signals
+    plot_n_signals_around_max, plot_two_signals_around_point, plot_both_signals, plot_n_signals, align_and_plot
 from locate.find_distance import calculate_x
 from locate.n_mics_intersection import calculate_n_mic_points
 from recording import FS, load_n_wav_files, load_two_wav_files
@@ -21,7 +21,7 @@ def get_aligned_target_signals(signals, calib_range, target_range, fs=FS):
 
     # Extract the calibration window
     calib_signals = [sig[calib_start:calib_end] for sig in signals]
-    plot_n_signals_around_max(calib_signals)
+    plot_n_signals_around_max(calib_signals, title="Calibration Signals")
     # Calculate calibration lags relative to Mic 0
     calib_lags = [0] * n
     for i in range(1, n):
@@ -40,7 +40,7 @@ def get_aligned_target_signals(signals, calib_range, target_range, fs=FS):
     # Truncate ends so they all match the shortest array length
     min_len = min(len(sig) for sig in aligned_signals)
     aligned_signals = [sig[:min_len] for sig in aligned_signals]
-    plot_n_signals_around_max(aligned_signals)
+    plot_n_signals_around_max(aligned_signals, title="Aligned Calibration Signals")
 
     print(f"--- Phase 1: Hardware Aligned ({a}s to {b}s) ---")
 
@@ -56,7 +56,8 @@ def get_aligned_target_signals(signals, calib_range, target_range, fs=FS):
 
     # Extract the target window from the ALIGNED signals
     target_signals = [sig[target_start:target_end] for sig in aligned_signals]
-    plot_n_signals_around_max(target_signals)
+    plot_n_signals(aligned_signals, title="Target Signals After Alignment")
+    plot_n_signals_around_max(target_signals, title="Target Signals After Alignment")
     return target_signals
 
 def get_t_arrivals_from_audio(signals, calib_range, target_range, fs=FS):
@@ -133,11 +134,9 @@ def find_x_from_audio(sig1, sig2, d, y, fs=FS):
     """
 
     # 2. Find the time delay (t)
-    lag_samples = calculate_cross_correlation(sig1, sig2, fs=fs, verbose=True)
+    _, _, lag_samples = align_and_plot(sig1, sig2)
     t = convert_samples_to_seconds(lag_samples, fs)
 
-    plot_both_signals(sig1, sig2, title="Target Signals")
-    plot_both_signals_around_max(sig1, sig2)
     print(f"Mic Distance (d): {d} m")
     print(f"Target Y (y): {y} m")
     print(f"Measured Delay (t): {t:.6f} seconds")
