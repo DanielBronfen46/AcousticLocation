@@ -160,8 +160,9 @@ def find_x_from_audio(sig1, sig2, d, y, fs=FS):
 def main():
     filedesc1 = "20260609_173250"
     filedesc2 = "20260609_183735"
+    filedesc3 = "20260616_134501"
 
-    signals = load_two_wav_files(filedesc2)
+    signals = load_two_wav_files(filedesc3)
 
     calib_range = (0, 10)
     target_range = (26, 29)
