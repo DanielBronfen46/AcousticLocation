@@ -223,6 +223,10 @@ def capture_by_alias(devices=None):
     if not active_devices:
         print("\n[API Error] No requested devices were found online.")
         return
+    
+    if len(active_devices) < 2:
+        print(f"\n[API Error] Only {len(active_devices)} device(s) detected. Minimum 2 devices required for synchronized recording. Aborting.")
+        return
 
     sync_barrier = threading.Barrier(len(active_devices))
     
