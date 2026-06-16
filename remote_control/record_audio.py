@@ -6,7 +6,7 @@ import shutil
 import re
 from moviepy import VideoFileClip
 from zeroconf import Zeroconf, ServiceBrowser
-import datetime
+from datetime import datetime
 
 # ==========================================
 #     PERMANENT HARDWARE ALIAS REGISTRY
@@ -25,7 +25,6 @@ MIC_INDEX_MAP = {
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 VIDEO_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "video_recordings"))
 AUDIO_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "audio_recordings"))
-MAX_RECORDINGS = 10
 
 # ==========================================
 #        AUTOMATIC M-DNS DISCOVERY
@@ -115,30 +114,8 @@ def extract_and_verify_audio(video_path, audio_path, alias):
         video.audio.write_audiofile(audio_path, fps=src_fps, nbytes=2, codec='pcm_s16le', logger=None)
         video.close()
         if os.path.exists(video_path): os.remove(video_path)
-        prune_recording_queue()
     except Exception as e:
         print(f"[{alias}] Local Extraction Error: {e}")
-
-
-def prune_recording_queue(max_files=MAX_RECORDINGS):
-    """Keep only the newest recordings in audio/video directories."""
-    for directory, extension in ((AUDIO_DIR, ".wav"), (VIDEO_DIR, ".mp4")):
-        if not os.path.isdir(directory):
-            continue
-        files = [
-            os.path.join(directory, f)
-            for f in os.listdir(directory)
-            if f.lower().endswith(extension)
-        ]
-        if len(files) <= max_files:
-            continue
-        files.sort(key=lambda path: os.path.getmtime(path))
-        for old_file in files[: len(files) - max_files]:
-            try:
-                os.remove(old_file)
-                print(f"[Retention] Removed old recording: {old_file}")
-            except Exception:
-                pass
 
 
 # ==========================================
@@ -228,7 +205,7 @@ def capture_by_alias(devices=None):
     
     # Generate the single snapshot timestamp accurate to the second
     # Format outcome example: 20260609_165032
-    master_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    master_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     
     threads = []
     print(f"\nProcessing execution instructions for {len(active_devices)} online sensor(s)...")
@@ -278,5 +255,3 @@ def record_audio(duration, mic_indexes):
 
 if __name__ == "__main__":
     record_audio(duration=30, mic_indexes=[1, 2])
-    # discover_live_network_nodes()
-

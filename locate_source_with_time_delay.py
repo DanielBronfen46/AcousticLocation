@@ -1,13 +1,36 @@
 import numpy as np
+from scipy.fft import fft, ifft
+from scipy.signal import butter, filtfilt, hilbert
 
 from alignment import calculate_cross_correlation, convert_samples_to_seconds, plot_both_signals_around_max, \
-    plot_n_signals_around_max, plot_two_signals_around_point, plot_both_signals, plot_n_signals, align_and_plot
+    plot_n_signals_around_max, plot_two_signals_around_point, plot_both_signals, plot_n_signals, align_and_plot, \
+    crop_and_correlate
 from locate.find_distance import calculate_x
 from locate.n_mics_intersection import calculate_n_mic_points
 from recording import FS, load_n_wav_files, load_two_wav_files
 
 
-def get_aligned_target_signals(signals, calib_range, target_range, fs=FS):
+def butter_bandpass_filter(signals, lowcut=500, highcut=8000, fs=44100, order=5):
+    nyq = 0.5 * fs
+    low = lowcut / nyq
+    high = highcut / nyq
+    b, a = butter(order, [low, high], btype='band')
+    return [filtfilt(b, a, sig) for sig in signals]
+
+def calc_envelopes(signals):
+    return [np.abs(hilbert(sig)) for sig in signals]
+
+
+def process_signals_for_correlation(signals):
+    #signals = calc_envelopes(signals)
+    signals = butter_bandpass_filter(signals)
+
+    return signals
+
+
+
+
+def get_aligned_target_signals(signals, calib_range, target_range, fs=FS, gcc_phat=False):
     n = len(signals)
     if n < 2:
         raise ValueError("Need at least 2 signals to compare.")
@@ -21,11 +44,12 @@ def get_aligned_target_signals(signals, calib_range, target_range, fs=FS):
 
     # Extract the calibration window
     calib_signals = [sig[calib_start:calib_end] for sig in signals]
+    calib_signals = process_signals_for_correlation(calib_signals)
     plot_n_signals_around_max(calib_signals, title="Calibration Signals")
     # Calculate calibration lags relative to Mic 0
     calib_lags = [0] * n
     for i in range(1, n):
-        calib_lags[i] = calculate_cross_correlation(calib_signals[0], calib_signals[i], fs=fs, verbose=False)
+        calib_lags[i] = calculate_cross_correlation(calib_signals[0], calib_signals[i], fs=fs, verbose=False, gcc_phat=gcc_phat)
 
     # Find out how much "dead air" to chop off the start of each original signal
     min_lag = min(calib_lags)
@@ -40,6 +64,7 @@ def get_aligned_target_signals(signals, calib_range, target_range, fs=FS):
     # Truncate ends so they all match the shortest array length
     min_len = min(len(sig) for sig in aligned_signals)
     aligned_signals = [sig[:min_len] for sig in aligned_signals]
+    aligned_signals = process_signals_for_correlation(aligned_signals)
     plot_n_signals_around_max(aligned_signals, title="Aligned Calibration Signals")
 
     print(f"--- Phase 1: Hardware Aligned ({a}s to {b}s) ---")
@@ -56,8 +81,8 @@ def get_aligned_target_signals(signals, calib_range, target_range, fs=FS):
 
     # Extract the target window from the ALIGNED signals
     target_signals = [sig[target_start:target_end] for sig in aligned_signals]
-    plot_n_signals(aligned_signals, title="Target Signals After Alignment")
-    plot_n_signals_around_max(target_signals, title="Target Signals After Alignment")
+    plot_n_signals(aligned_signals, title="Target Signals After Calibration Alignment")
+    plot_n_signals_around_max(target_signals, title="Target Signals After Calibration Alignment")
     return target_signals
 
 def get_t_arrivals_from_audio(signals, calib_range, target_range, fs=FS):
@@ -88,8 +113,7 @@ def get_t_arrivals_from_audio(signals, calib_range, target_range, fs=FS):
 
     return t_arrivals
 
-
-def locate_source_from_audio(file_desc, mics_dict, calib_range, target_range, n=None, fs=44100):
+def locate_source_from_audio(file_desc, mics_dict, calib_range, target_range, n=None, fs=FS):
     """
     End-to-end pipeline:
     1. Loads audio files.
@@ -162,7 +186,7 @@ def main():
     filedesc2 = "20260609_183735"
     filedesc3 = "20260616_134501"
 
-    signals = load_two_wav_files(filedesc3)
+    signals = load_two_wav_files(filedesc2)
 
     calib_range = (0, 10)
     target_range = (26, 29)
@@ -170,7 +194,7 @@ def main():
     y = 0
 
     #true 63
-    target1, target2 = get_aligned_target_signals(signals, calib_range, target_range, fs=FS)
+    target1, target2 = get_aligned_target_signals(signals, calib_range, target_range, fs=FS, gcc_phat=True)
 
     find_x_from_audio(target1, target2, d, y, fs=44100)
 

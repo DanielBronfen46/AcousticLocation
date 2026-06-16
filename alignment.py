@@ -6,6 +6,8 @@ import time
 import numpy as np
 from scipy import signal
 import matplotlib.pyplot as plt
+from scipy.fft import fft, ifft
+from scipy.signal import hilbert, correlate, correlation_lags
 
 from recording import record_two_signals, FS, trim_zeroes, load_two_wav_files
 
@@ -216,7 +218,133 @@ def compare_n_signals_at_multiple_points(signals, n_points, fs=FS, zoom_window=0
         )
 
 
-def calculate_cross_correlation(sig1 ,sig2, fs=FS, verbose=True):
+def calculate_cross_correlation_with_gcc(sig1, sig2, fs=FS, window_sec=0.05, verbose=False):
+    """
+    Two-Stage Alignment:
+    1. Coarse alignment using Hilbert envelopes (fixes massive hardware sync issues).
+    2. Fine alignment using GCC-PHAT on a single isolated clap.
+    """
+
+    # ==========================================
+    # STAGE 1: COARSE ALIGNMENT (Envelope)
+    # ==========================================
+    # Get the "shape" of the audio, ignoring the high-frequency sound waves
+    env1 = np.abs(hilbert(sig1))
+    env2 = np.abs(hilbert(sig2))
+
+    # Standard correlation on the envelopes to find the macro hardware delay
+    coarse_corr = correlate(env2, env1, mode='full', method='fft')
+    lags = correlation_lags(len(env1), len(env2), mode='full')
+    coarse_lag = lags[np.argmax(coarse_corr)]
+
+    if verbose:
+        print(f"-> Stage 1 (Coarse): Shifted by {coarse_lag} samples ({coarse_lag/fs:.4f}s)")
+
+    # Temporarily shift sig2 by the coarse lag so the claps physically overlap
+    if coarse_lag > 0:
+        sig1_aligned = sig1
+        sig2_aligned = sig2[coarse_lag:]
+    elif coarse_lag < 0:
+        sig1_aligned = sig1[abs(coarse_lag):]
+        sig2_aligned = sig2
+    else:
+        sig1_aligned = sig1
+        sig2_aligned = sig2
+
+    # Make them equal length for Stage 2
+    min_len = min(len(sig1_aligned), len(sig2_aligned))
+    sig1_aligned = sig1_aligned[:min_len]
+    sig2_aligned = sig2_aligned[:min_len]
+
+
+    # ==========================================
+    # STAGE 2: FINE ALIGNMENT (GCC-PHAT)
+    # ==========================================
+    # Now that the claps overlap, find the absolute loudest peak
+    peak_idx = np.argmax(np.abs(sig1_aligned))
+
+    # Crop a very tight window (e.g., 0.05s) around that single peak
+    half_window = int(window_sec * fs)
+    start_idx = max(0, peak_idx - half_window)
+    end_idx = min(len(sig1_aligned), peak_idx + half_window)
+
+    sig1_crop = sig1_aligned[start_idx:end_idx]
+    sig2_crop = sig2_aligned[start_idx:end_idx]
+
+    # Run GCC-PHAT on this tiny, single-clap window
+    n = len(sig1_crop) + len(sig2_crop) - 1
+    n_fft = 1 << (n - 1).bit_length()
+
+    SIG1 = fft(sig1_crop, n=n_fft)
+    SIG2 = fft(sig2_crop, n=n_fft)
+
+    R = SIG1 * np.conj(SIG2)
+    magnitude = np.abs(R)
+    threshold = np.max(magnitude) * 1e-3
+
+    cc = np.real(ifft(R / np.maximum(magnitude, threshold)))
+    cc = np.concatenate((cc[-n_fft // 2:], cc[:n_fft // 2]))
+
+    fine_lag = np.argmax(cc) - (n_fft // 2)
+
+    if verbose:
+        print(f"-> Stage 2 (Fine): Sub-adjusted by {fine_lag} samples ({fine_lag/fs:.6f}s)")
+
+    # ==========================================
+    # COMBINE LAGS
+    # ==========================================
+    # The total true delay is the massive hardware shift PLUS the micro acoustic shift
+    total_lag = coarse_lag + fine_lag
+
+    return total_lag
+
+def crop_and_correlate(sig1, sig2, fs=FS, window_sec=0.01, verbose=True, gcc_phat=False):
+    """
+    Crops both signals around their independent maximums, passes the clean
+    crops to the existing cross-correlation function, and calculates the true lag.
+    """
+    half_window = int(window_sec * fs)
+
+    # 1. Crop Mic 1 around its absolute maximum
+    peak1_idx = np.argmax(np.abs(sig1))
+    start1 = max(0, peak1_idx - half_window)
+    end1 = min(len(sig1), peak1_idx + half_window)
+    crop1 = sig1[start1:end1]
+
+    # 2. Crop Mic 2 around its absolute maximum
+    peak2_idx = np.argmax(np.abs(sig2))
+    start2 = max(0, peak2_idx - half_window)
+    end2 = min(len(sig2), peak2_idx + half_window)
+    crop2 = sig2[start2:end2]
+
+    # 3. Pass the clean, single-clap crops to your existing function
+    # (Assuming calculate_cross_correlation is already imported)
+    # We pass gcc_phat=False or True based on which method you currently want to test
+    crop_lag = calculate_cross_correlation(crop1, crop2, fs=fs, verbose=False, gcc_phat=gcc_phat)
+
+    # 4. Reconstruct the global delay
+    # The lag returned is the micro-delay between the two crops.
+    # To get the true delay between the original 30-second files,
+    # we must add the difference in where we started cutting.
+    index_difference = start2 - start1
+    true_lag = crop_lag + index_difference
+
+    if verbose:
+        print("-" * 30)
+        print("CROPPING STATS:")
+        print(f"Mic 1 cut at index: {start1}")
+        print(f"Mic 2 cut at index: {start2}")
+        print(f"Cut Difference: {index_difference} samples")
+        print(f"Crop-to-Crop Lag: {crop_lag} samples")
+        print(f"-> Final True Lag: {true_lag} samples ({true_lag/fs:.5f}s)")
+        print("-" * 30)
+
+    return true_lag
+
+def calculate_cross_correlation(sig1 ,sig2, fs=FS, verbose=True, gcc_phat=False):
+
+    if gcc_phat:
+        return calculate_cross_correlation_with_gcc(sig1, sig2)
 
     # 1. Perform the cross-correlation
     # We use method='fft' because doing this in the time domain would take forever
@@ -271,6 +399,8 @@ def calculate_cross_correlation(sig1 ,sig2, fs=FS, verbose=True):
 
     return lag_in_samples
 
+
+
 def convert_samples_to_seconds(num_samples, fs=FS):
     return num_samples / fs
 
@@ -308,10 +438,10 @@ def align_signals_given_lag(sig1, sig2, lag_in_samples):
 def align_and_plot(sig1, sig2):
     lag_in_samples = calculate_cross_correlation(sig1, sig2)
 
-    lag_in_samples -= int((0.004 - 0.0018) * 44100)
     aligned1, aligned2 = align_signals_given_lag(sig1, sig2, lag_in_samples)
 
     plot_both_signals(sig1, sig2, title="Before Alignment")
+    plot_both_signals_around_max(sig1, sig2, title="Before Alignment around Max", zoom_window=0.02)
     plot_both_signals(aligned1, aligned2, title="After Alignment")
     plot_both_signals_around_max(aligned1, aligned2, title="After Alignment around Max", zoom_window=0.02)
     compare_two_signals_at_multiple_points(aligned1, aligned2, n_points=6)
