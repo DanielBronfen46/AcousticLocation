@@ -89,7 +89,7 @@ def get_t_arrivals_from_audio(signals, calib_range, target_range, fs=FS):
     return t_arrivals
 
 
-def locate_source_from_audio(file_desc, mics_dict, calib_range, target_range, n=None, fs=48000):
+def locate_source_from_audio(file_desc, mics_dict, calib_range, target_range, n=None, fs=44100):
     """
     End-to-end pipeline:
     1. Loads audio files.
@@ -159,19 +159,19 @@ def find_x_from_audio(sig1, sig2, d, y, fs=FS):
 
 def main():
     filedesc1 = "20260609_173250"
-    filedesc2 = "20260609_180357"
+    filedesc2 = "20260609_183735"
 
     signals = load_two_wav_files(filedesc2)
 
     calib_range = (0, 10)
     target_range = (26, 29)
-    d = 1.83
-    y = 0.1
+    d = 2
+    y = 0
 
     #true 63
     target1, target2 = get_aligned_target_signals(signals, calib_range, target_range, fs=FS)
 
-    find_x_from_audio(target1, target2, d, y, fs=48000)
+    find_x_from_audio(target1, target2, d, y, fs=44100)
 
 if __name__ == "__main__":
     main()

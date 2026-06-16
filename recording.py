@@ -11,7 +11,7 @@ import soundfile as sf
 from scipy.signal import butter, filtfilt
 
 # --- Configuration ---
-FS = 48000  # Sample rate (44100 Hz is standard for audio)
+FS = 44100  # Sample rate (44100 Hz is standard for audio)
 OUTPUT_FOLDER = "audio_recordings"
 
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
