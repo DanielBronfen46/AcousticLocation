@@ -185,7 +185,7 @@ def main():
     filedesc1 = "20260609_173250"
     filedesc2 = "20260609_183735"
     filedesc3 = "20260616_134501"
-
+    
     signals = load_two_wav_files(filedesc2)
 
     calib_range = (0, 10)
