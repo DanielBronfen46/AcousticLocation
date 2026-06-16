@@ -258,4 +258,6 @@ def record_audio(duration, mic_indexes):
 
 
 if __name__ == "__main__":
-    record_audio(duration=30, mic_indexes=[1, 2])
+    record_audio(duration=30, mic_indexes=[1, 2, 3])
+    # discover_live_network_nodes()
+    
