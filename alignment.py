@@ -9,216 +9,13 @@ import matplotlib.pyplot as plt
 from scipy.fft import fft, ifft
 from scipy.signal import hilbert, correlate, correlation_lags
 
-from recording import record_two_signals, FS, trim_zeroes, load_two_wav_files
+from plotting_functions import plot_both_signals, plot_both_signals_around_max, compare_two_signals_at_multiple_points, \
+    plot_n_signals, compare_n_signals_at_multiple_points, plot_n_signals_around_max, plot_before_after_comparison
+from sound_file_handling import FS, load_two_wav_files
 
 
-def plot_signal(signal_data, fs=FS, title="Audio Signal"):
-    """
-    Plots a single 1D audio signal over time.
-    """
-    # Create an array of time values (in seconds) that matches the length of the signal
-    time_axis = np.arange(len(signal_data)) / fs
 
-    plt.figure(figsize=(10, 4))  # Width, Height
-    plt.plot(time_axis, signal_data, color='blue', alpha=0.7)
-
-    plt.title(title)
-    plt.xlabel("Time (seconds)")
-    plt.ylabel("Amplitude")
-    plt.grid(True, linestyle='--', alpha=0.6)
-    plt.tight_layout()
-    plt.show()
-
-def plot_both_signals(sig1, sig2, fs=FS, title="Microphone Comparison"):
-    """
-    Plots two signals on the same graph to visually compare them.
-    """
-    time_axis1 = np.arange(len(sig1)) / fs
-    time_axis2 = np.arange(len(sig2)) / fs
-
-    plt.figure(figsize=(12, 5))
-
-    # Plot Mic 1
-    plt.plot(time_axis1, sig1, label="Mic 1", color='blue', alpha=0.7)
-    # Plot Mic 2
-    plt.plot(time_axis2, sig2, label="Mic 2", color='red', alpha=0.7)
-
-    plt.title(title)
-    plt.xlabel("Time (seconds)")
-    plt.ylabel("Amplitude")
-    plt.legend(loc="upper right")
-    plt.grid(True, linestyle='--', alpha=0.6)
-    plt.tight_layout()
-    plt.show()
-
-def plot_both_signals_around_max(sig1, sig2, fs=FS, title="Microphone Comparison around Maximum", zoom_window=0.1):
-    """
-    Plots two signals and automatically zooms in on the loudest sound (the clap).
-    zoom_window defines how many seconds before and after the clap to show.
-    """
-    time_axis1 = np.arange(len(sig1)) / fs
-    time_axis2 = np.arange(len(sig2)) / fs
-
-    # --- NEW: Auto-Zoom Logic ---
-    # 1. Find the index of the absolute loudest sample in Mic 1
-    peak_index = np.argmax(np.abs(sig1))
-
-    # 2. Convert that index into an actual time in seconds
-    peak_time = time_axis1[peak_index]
-
-    # 3. Calculate the viewing window boundaries
-    x_min = max(0, peak_time - zoom_window)  # Ensure we don't zoom past 0 seconds
-    x_max = min(len(sig1) / fs, peak_time + zoom_window)
-
-    plt.figure(figsize=(12, 5))
-
-    # Plot Mic 1
-    plt.plot(time_axis1, sig1, label="Mic 1", color='blue', alpha=0.7)
-    # Plot Mic 2
-    plt.plot(time_axis2, sig2, label="Mic 2", color='red', alpha=0.7)
-
-    plt.title(title + f" (Zoomed at {peak_time:.2f}s)")
-    plt.xlabel("Time (seconds)")
-    plt.ylabel("Amplitude")
-    plt.legend(loc="upper right")
-    plt.grid(True, linestyle='--', alpha=0.6)
-
-    # Apply the zoom
-    plt.xlim(x_min, x_max)
-
-    plt.tight_layout()
-    plt.show()
-
-def plot_two_signals_around_point(sig1, sig2, point_time, fs=FS, title=f"Zoomed in Microphone Comparison", zoom_window=0.1):
-    time_axis1 = np.arange(len(sig1)) / fs
-    time_axis2 = np.arange(len(sig2)) / fs
-
-    # 3. Calculate the viewing window boundaries
-    x_min = max(0, point_time - zoom_window)  # Ensure we don't zoom past 0 seconds
-    x_max = min(len(sig1) / fs, point_time + zoom_window)
-
-    plt.figure(figsize=(12, 5))
-
-    # Plot Mic 1
-    plt.plot(time_axis1, sig1, label="Mic 1", color='blue', alpha=0.7)
-    # Plot Mic 2
-    plt.plot(time_axis2, sig2, label="Mic 2", color='red', alpha=0.7)
-
-    plt.title(title + f" (Zoomed at {point_time:.2f}s)")
-    plt.xlabel("Time (seconds)")
-    plt.ylabel("Amplitude")
-    plt.legend(loc="upper right")
-    plt.grid(True, linestyle='--', alpha=0.6)
-
-    # Apply the zoom
-    plt.xlim(x_min, x_max)
-
-    plt.tight_layout()
-    plt.show()
-
-def compare_two_signals_at_multiple_points(sig1, sig2, n_points, fs=FS, zoom_window=0.1):
-    time_len = len(sig1) / fs
-    point_arr = np.linspace(zoom_window, time_len-zoom_window, num=n_points, endpoint=True)
-
-    for i in range(len(point_arr)):
-        plot_two_signals_around_point(sig1, sig2, point_arr[i], fs=fs, title=f"Microphone Comparison {i+1}/{n_points}")
-
-def plot_n_signals(signals, fs=FS, title="N Microphones Comparison"):
-    plt.figure(figsize=(12, 5))
-
-    for i, sig in enumerate(signals):
-        time_axis = np.arange(len(sig)) / fs
-        plt.plot(time_axis, sig, label=f"Mic {i + 1}", alpha=0.7)
-
-    plt.title(title)
-    plt.xlabel("Time (seconds)")
-    plt.ylabel("Amplitude")
-    plt.legend(loc="upper right")
-    plt.grid(True, linestyle='--', alpha=0.6)
-    plt.tight_layout()
-    plt.show()
-
-def plot_n_signals_around_max(signals, fs=FS, title="Zoomed Microphones", zoom_window=0.1):
-    plt.figure(figsize=(12, 5))
-
-    # Use the first signal to find the peak for zooming
-    peak_index = np.argmax(np.abs(signals[0]))
-    peak_time = peak_index / fs
-    x_min = max(0, peak_time - zoom_window)
-    x_max = min(len(signals[0]) / fs, peak_time + zoom_window)
-
-    for i, sig in enumerate(signals):
-        time_axis = np.arange(len(sig)) / fs
-        plt.plot(time_axis, sig, label=f"Mic {i + 1}", alpha=0.7)
-
-    plt.title(f"{title} (Zoomed at {peak_time:.2f}s)")
-    plt.xlabel("Time (seconds)")
-    plt.ylabel("Amplitude")
-    plt.xlim(x_min, x_max)
-    plt.legend(loc="upper right")
-    plt.grid(True, linestyle='--', alpha=0.6)
-    plt.tight_layout()
-    plt.show()
-
-def plot_n_signals_around_point(signals, point_time, fs=FS, title="Zoomed N-Microphone Comparison", zoom_window=0.1):
-    """
-    Plots a list of N signals zoomed in around a specific point in time.
-    """
-    if not signals:
-        return
-
-    # Calculate the viewing window boundaries based on the target point
-    x_min = max(0, point_time - zoom_window)
-    # Use the first signal's length as a safety cap for the max x-axis
-    max_time = len(signals[0]) / fs
-    x_max = min(max_time, point_time + zoom_window)
-
-    plt.figure(figsize=(12, 5))
-
-    # Plot every signal dynamically
-    for i, sig in enumerate(signals):
-        time_axis = np.arange(len(sig)) / fs
-        plt.plot(time_axis, sig, label=f"Mic {i+1}", alpha=0.7)
-
-    plt.title(title + f" (Zoomed at {point_time:.2f}s)")
-    plt.xlabel("Time (seconds)")
-    plt.ylabel("Amplitude")
-    plt.legend(loc="upper right")
-    plt.grid(True, linestyle='--', alpha=0.6)
-
-    # Apply the zoom
-    plt.xlim(x_min, x_max)
-
-    plt.tight_layout()
-    plt.show()
-
-def compare_n_signals_at_multiple_points(signals, n_points, fs=FS, zoom_window=0.1):
-    """
-    Calculates evenly spaced points across N signals and plots zoomed-in comparisons for each.
-    """
-    if not signals:
-        return
-
-    # Use the length of the first signal to represent the total time.
-    # (Assuming they have already been aligned and truncated to the same length)
-    time_len = len(signals[0]) / fs
-
-    # Generate the evenly spaced points
-    point_arr = np.linspace(zoom_window, time_len - zoom_window, num=n_points, endpoint=True)
-
-    # Loop through each calculated point and plot
-    for i, point_time in enumerate(point_arr):
-        plot_title = f"N-Microphone Comparison {i + 1}/{n_points}"
-        plot_n_signals_around_point(
-            signals,
-            point_time,
-            fs=fs,
-            title=plot_title,
-            zoom_window=zoom_window
-        )
-
-
-def calculate_cross_correlation_with_gcc(sig1, sig2, fs=FS, window_sec=0.05, verbose=False):
+def _calculate_cross_correlation_with_gcc(sig1, sig2, fs=FS, window_sec=0.05, verbose=False):
     """
     Two-Stage Alignment:
     1. Coarse alignment using Hilbert envelopes (fixes massive hardware sync issues).
@@ -238,7 +35,7 @@ def calculate_cross_correlation_with_gcc(sig1, sig2, fs=FS, window_sec=0.05, ver
     coarse_lag = lags[np.argmax(coarse_corr)]
 
     if verbose:
-        print(f"-> Stage 1 (Coarse): Shifted by {coarse_lag} samples ({coarse_lag/fs:.4f}s)")
+        print(f"-> Stage 1 (Cross Correlation): Shifted by {coarse_lag} samples ({coarse_lag/fs:.4f}s)")
 
     # Temporarily shift sig2 by the coarse lag so the claps physically overlap
     if coarse_lag > 0:
@@ -288,7 +85,7 @@ def calculate_cross_correlation_with_gcc(sig1, sig2, fs=FS, window_sec=0.05, ver
     fine_lag = np.argmax(cc) - (n_fft // 2)
 
     if verbose:
-        print(f"-> Stage 2 (Fine): Sub-adjusted by {fine_lag} samples ({fine_lag/fs:.6f}s)")
+        print(f"-> Stage 2 (GCC-PHAT): Sub-adjusted by {fine_lag} samples ({fine_lag/fs:.6f}s)")
 
     # ==========================================
     # COMBINE LAGS
@@ -296,9 +93,11 @@ def calculate_cross_correlation_with_gcc(sig1, sig2, fs=FS, window_sec=0.05, ver
     # The total true delay is the massive hardware shift PLUS the micro acoustic shift
     total_lag = coarse_lag + fine_lag
 
+    save_stats(sig1, sig2, total_lag)
+
     return total_lag
 
-def crop_and_correlate(sig1, sig2, fs=FS, window_sec=0.01, verbose=True, gcc_phat=False):
+def _crop_around_max_and_correlate(sig1, sig2, fs=FS, window_sec=0.05, verbose=False, gcc_phat=False):
     """
     Crops both signals around their independent maximums, passes the clean
     crops to the existing cross-correlation function, and calculates the true lag.
@@ -320,7 +119,7 @@ def crop_and_correlate(sig1, sig2, fs=FS, window_sec=0.01, verbose=True, gcc_pha
     # 3. Pass the clean, single-clap crops to your existing function
     # (Assuming calculate_cross_correlation is already imported)
     # We pass gcc_phat=False or True based on which method you currently want to test
-    crop_lag = calculate_cross_correlation(crop1, crop2, fs=fs, verbose=False, gcc_phat=gcc_phat)
+    crop_lag = calculate_cross_correlation(crop1, crop2, fs=fs, verbose=verbose, gcc_phat=gcc_phat)
 
     # 4. Reconstruct the global delay
     # The lag returned is the micro-delay between the two crops.
@@ -341,10 +140,10 @@ def crop_and_correlate(sig1, sig2, fs=FS, window_sec=0.01, verbose=True, gcc_pha
 
     return true_lag
 
-def calculate_cross_correlation(sig1 ,sig2, fs=FS, verbose=True, gcc_phat=False):
+def calculate_cross_correlation(sig1 ,sig2, fs=FS, verbose=False, gcc_phat=False):
 
     if gcc_phat:
-        return calculate_cross_correlation_with_gcc(sig1, sig2)
+        return _calculate_cross_correlation_with_gcc(sig1, sig2, verbose=verbose)
 
     # 1. Perform the cross-correlation
     # We use method='fft' because doing this in the time domain would take forever
@@ -431,24 +230,24 @@ def align_signals_given_lag(sig1, sig2, lag_in_samples):
     aligned_sig1 = aligned_sig1[:min_len]
     aligned_sig2 = aligned_sig2[:min_len]
 
-    aligned_sig1, aligned_sig2 = trim_zeroes(aligned_sig1, aligned_sig2)
+    #aligned_sig1, aligned_sig2 = trim_zeroes(aligned_sig1, aligned_sig2)
 
     return aligned_sig1, aligned_sig2
 
-def align_and_plot(sig1, sig2):
-    lag_in_samples = calculate_cross_correlation(sig1, sig2)
+def align_two_signals(sig1, sig2, plot=True, verbose=False, gcc_phat=False):
+    lag_in_samples = calculate_cross_correlation(sig1, sig2, verbose=verbose, gcc_phat=gcc_phat)
 
     aligned1, aligned2 = align_signals_given_lag(sig1, sig2, lag_in_samples)
 
-    plot_both_signals(sig1, sig2, title="Before Alignment")
-    plot_both_signals_around_max(sig1, sig2, title="Before Alignment around Max", zoom_window=0.02)
-    plot_both_signals(aligned1, aligned2, title="After Alignment")
-    plot_both_signals_around_max(aligned1, aligned2, title="After Alignment around Max", zoom_window=0.02)
-    compare_two_signals_at_multiple_points(aligned1, aligned2, n_points=6)
+    if plot:
+        signals = [sig1, sig2]
+        aligned = [aligned1, aligned2]
+        plot_before_after_comparison(signals, aligned)
+        compare_two_signals_at_multiple_points(aligned1, aligned2, n_points=6)
 
     return aligned1, aligned2, lag_in_samples
 
-def align_n_signals(signals, fs=FS):
+def calculate_lags_and_align_n_signals(signals, fs=FS, verbose=False, gcc_phat=False):
     """
     Aligns a list of N signals using signals[0] as the reference.
     """
@@ -457,8 +256,9 @@ def align_n_signals(signals, fs=FS):
 
     # 1. Calculate lags relative to the first signal
     for i in range(1, n):
+        print(f"CALCULATING LAG OF MIC {i}:")
         # We set verbose=False so it calculates quietly in the background
-        lags[i] = calculate_cross_correlation(signals[0], signals[i], fs=fs, verbose=False)
+        lags[i] = calculate_cross_correlation(signals[0], signals[i], fs=fs, verbose=verbose, gcc_phat=gcc_phat)
 
     # 2. Normalize the lags into start indices
     # A negative lag means a signal heard the sound EARLIER than the reference.
@@ -481,22 +281,16 @@ def align_n_signals(signals, fs=FS):
 
     return aligned_signals, lags
 
-def align_and_plot_n(signals):
+def align_n_signals(signals, plot=True, verbose=False, gcc_phat=False):
 
-    aligned_signals, lags = align_n_signals(signals)
+    aligned_signals, lags = calculate_lags_and_align_n_signals(signals, verbose=verbose, gcc_phat=gcc_phat)
 
-    plot_n_signals(signals, title="Before Alignment")
-    plot_n_signals(aligned_signals, title="After Alignment")
-    plot_n_signals_around_max(aligned_signals, title="After Alignment around Max", zoom_window=0.02)
-    compare_n_signals_at_multiple_points(aligned_signals, n_points=4)
+    if plot:
+        plot_before_after_comparison(signals, aligned_signals)
+        compare_n_signals_at_multiple_points(aligned_signals, n_points=4)
 
     return aligned_signals, lags
 
-
-def record_and_align(duration):
-    sig1, sig2 = record_two_signals(duration=duration)
-
-    align_and_plot(sig1, sig2)
 
 def save_stats(sig1, sig2, lag_in_samples, fs=FS):
     lag_in_seconds = convert_samples_to_seconds(lag_in_samples, fs)
@@ -531,28 +325,10 @@ def save_stats(sig1, sig2, lag_in_samples, fs=FS):
 
     print(f"Appended alignment statistics to {stats_filename}")
 
-def record_split_and_align():
-    sig1_matched, sig2_matched = record_two_signals(duration = 10)
-
-    min_len = min(len(sig1_matched), len(sig2_matched))
-
-    # 2. Find the exact midpoint (using // ensures it returns a whole integer)
-    midpoint = min_len // 2
-
-    # 3. Slice the arrays into halves
-    sig1a = sig1_matched[:midpoint]
-    sig1b = sig1_matched[midpoint:]
-
-    sig2a = sig2_matched[:midpoint]
-    sig2b = sig2_matched[midpoint:]
-
-    align_and_plot(sig1a, sig2a)
-    align_and_plot(sig1b, sig2b)
-
 def load_and_align(file_desc):
     sig1, sig2 = load_two_wav_files(file_desc)
 
-    align_and_plot(sig1, sig2)
+    align_two_signals(sig1, sig2)
 
 
 def main():

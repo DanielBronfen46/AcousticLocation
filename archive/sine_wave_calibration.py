@@ -1,12 +1,12 @@
 from scipy.interpolate import interp1d
 import numpy as np
-from scipy.optimize import minimize_scalar
 from scipy.signal import butter, filtfilt, hilbert
 
-from alignment import plot_both_signals, plot_both_signals_around_max, compare_two_signals_at_multiple_points
-from recording import record_two_signals, FS, load_two_usb_recordings, trim_zeroes
+from alignment import compare_two_signals_at_multiple_points
+from archive.recording import FS
 import matplotlib.pyplot as plt
 
+from sound_file_handling import match_signals_and_trim_zeroes, load_two_wav_files
 
 
 def apply_lowpass_filter(sig, cutoff_freq, fs=FS, order=4):
@@ -256,7 +256,7 @@ def fix_frequency_and_phase(sig1, sig2, delta_fs, delta_t_s, fs=FS):
     # 6. Generate the perfectly aligned sig2
     sig2_resampled = interpolator(t_target)
 
-    sig1_aligned, sig2_aligned = trim_zeroes(sig1, sig2_resampled)
+    sig1_aligned, sig2_aligned = match_signals_and_trim_zeroes(sig1, sig2_resampled)
 
     return sig1_aligned, sig2_aligned
 
@@ -281,14 +281,8 @@ def calibrate_sine_waves_and_plot(sig1, sig2, f_played, fs=FS):
     return sig1_fixed, sig2_fixed, delta_fs, delta_t_s, scale_factor
 
 
-def record_sine_signals_and_fix(f_played, duration):
-    sig1, sig2 = record_two_signals(duration=duration)
-
-
-    calibrate_sine_waves_and_plot(sig1, sig2, f_played)
-
 def load_sine_signals_and_fix(f_played, file_desc):
-    sig1, sig2 = load_two_usb_recordings(file_desc)
+    sig1, sig2 = load_two_wav_files(file_desc)
 
     calibrate_sine_waves_and_plot(sig1, sig2, f_played)
 
@@ -296,7 +290,7 @@ def load_sine_signals_and_fix(f_played, file_desc):
 def main():
     file_desc = "recording_2026-05-31_12-45-41_200hz_20s"
     #file_desc = "recording_2026-05-31_10-41-31_200hz_5s"
-    record_sine_signals_and_fix(f_played=200, duration=40)
+    #record_sine_signals_and_fix(f_played=200, duration=40)
     #load_sine_signals_and_fix(f_played=200, file_desc=file_desc)
 
 if __name__ == "__main__":

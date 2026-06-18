@@ -8,8 +8,10 @@ def calculate_x(t, d, y):
     if abs(D) >= d:
         raise ValueError("tc > d. something went wrong with alignment.")
     A = d**2 - D**2
-    x = (d / 2) + (D * math.sqrt(A**2 + 4 * A * y**2)) / (2 * A)
-    return x
+    dist_from_mic2 = (d / 2) + (D * math.sqrt(A**2 + 4 * A * y**2)) / (2 * A)
+
+    dist_from_mic1 = d-dist_from_mic2
+    return dist_from_mic1
 
 def main():
     delay = 0.0005  # Example time delay in seconds (500 microseconds)
