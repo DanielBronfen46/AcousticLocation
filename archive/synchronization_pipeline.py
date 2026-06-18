@@ -1,24 +1,18 @@
 import numpy as np
-import sounddevice as sd
 import time
-import soundfile as sf
 import os
 import threading
-from scipy.interpolate import interp1d
-from scipy import signal
-from scipy.optimize import minimize_scalar
-from recording import convert_m4a_to_wav, save_audio_file
+from archive.recording import save_audio_file
 
 # Import all your perfected math and plotting functions
-from recording import record_two_signals, FS, OUTPUT_FOLDER, trim_zeroes, apply_highpass_filter, load_two_usb_recordings
-from alignment import calculate_cross_correlation, align_signals_given_lag, align_and_plot
+from archive.recording import FS, OUTPUT_FOLDER
+from alignment import align_signals_given_lag, align_two_signals
+from plotting_functions import plot_both_signals
 from sine_wave_calibration import (  # Replace with the actual name of your file
-    find_sample_frequency_diff_IQ,
-    fix_frequency_and_phase,
     match_amplitude,
-    plot_both_signals,
     plot_xy_signals, calibrate_sine_waves_and_plot
 )
+from sound_file_handling import convert_m4a_to_wav, load_two_wav_files
 
 
 # ==========================================
@@ -56,7 +50,8 @@ def record_guided_session(clap_perf, sine_perf, target_start, total_duration, f_
     ui_thread.start()
 
     # 2. Start the hardware recording on the MAIN thread
-    sig1, sig2 = record_two_signals(fs=fs, duration=total_duration)
+    #sig1, sig2 = record_two_signals(fs=fs, duration=total_duration)
+    sig1, sig2 = None, None
 
     # 3. Ensure the UI thread has completely finished before moving on
     ui_thread.join()
@@ -137,7 +132,7 @@ def run_synchronization_pipeline(
         corr_target2 = slice_audio(sig2_freq_fixed, clap_analysis_window[0], clap_analysis_window[1], fs)
 
     # Use your wrapper to align the targets and plot the results
-    _, _, lag_in_samples = align_and_plot(corr_target1, corr_target2)
+    _, _, lag_in_samples = align_two_signals(corr_target1, corr_target2)
 
     # Apply the integer macro shift to the full frequency-fixed arrays
     sig1_macro, sig2_macro = align_signals_given_lag(raw_sig1, sig2_freq_fixed, lag_in_samples)
@@ -202,7 +197,7 @@ def load_and_run_synchronization_pipeline(
                                           ):
 
     # Step A: Record the raw master file
-    raw_sig1, raw_sig2 = load_two_usb_recordings(filedesc)
+    raw_sig1, raw_sig2 = load_two_wav_files(filedesc)
 
     run_synchronization_pipeline(
         raw_sig1, raw_sig2,

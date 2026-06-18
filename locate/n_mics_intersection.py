@@ -1,6 +1,8 @@
 import numpy as np
 from itertools import combinations
 
+from matplotlib import pyplot as plt
+
 c = 343 # speed of sound in m/s
 
 def algebraic_intersection(mA, mB, mC, delta_AB, delta_AC):
@@ -61,7 +63,7 @@ def algebraic_intersection(mA, mB, mC, delta_AB, delta_AC):
 
     return best_pt
 
-def calculate_n_mic_points(mics: dict, t_arrivals: dict):
+def calculate_n_mic_points(mics: dict, t_arrivals: dict, plot=False):
     """
     Generalized TDOA solver for N microphones.
     Evaluates every unique triplet combination of microphones.
@@ -92,9 +94,92 @@ def calculate_n_mic_points(mics: dict, t_arrivals: dict):
     total_attempts = total_triplets * 3  # 3 intersection calculations per triplet
     successful_points = len(all_points)
 
+    if plot:
+        # Calculate a quick estimated intersection to feed the plotter
+        est_intersection = np.mean(all_points, axis=0) if all_points else None
+        plot_tdoa_hyperbolas(mics, t_arrivals, points=all_points, est_intersection=est_intersection)
+
     print(f"Found {successful_points} valid intersections out of {total_attempts} attempted calculations. Success rate of {successful_points/total_attempts*100:.1f}%")
 
     return all_points
+
+
+def plot_tdoa_hyperbolas(mics, t_arrivals, points=None, est_intersection=None):
+    """
+    Plots the microphones, the hyperbolas representing the distance differences,
+    the raw intersection points, and the final estimated source location.
+    """
+    # 1. Determine the boundaries of our graph based on mic locations
+    all_x = [m[0] for m in mics.values()]
+    all_y = [m[1] for m in mics.values()]
+
+    if est_intersection is not None:
+        all_x.append(est_intersection[0])
+        all_y.append(est_intersection[1])
+
+    # Add a 15-meter padding around our outermost points so we can see the curves
+    padding = 3
+    x_min, x_max = min(all_x) - padding, max(all_x) + padding
+    y_min, y_max = min(all_y) - padding, max(all_y) + padding
+
+    # 2. Create a dense 2D grid of coordinates to evaluate the hyperbola equations
+    xx = np.linspace(x_min, x_max, 400)
+    yy = np.linspace(y_min, y_max, 400)
+    X, Y = np.meshgrid(xx, yy)
+
+    plt.figure(figsize=(10, 8))
+
+    # 3. Plot Mics
+    for mic_id, coord in mics.items():
+        plt.plot(coord[0], coord[1], 'ks', markersize=8)
+        plt.text(coord[0] + 0.5, coord[1] + 0.5, f'Mic {mic_id}', fontsize=12, fontweight='bold')
+
+    # 4. Plot Hyperbolas for every unique pair of microphones
+    mic_ids = list(mics.keys())
+    pairs = list(combinations(mic_ids, 2))
+    colors = plt.cm.tab10(np.linspace(0, 1, len(pairs)))
+
+    for idx, (i, j) in enumerate(pairs):
+        # Target distance difference based on our audio delays
+        d_ij = (t_arrivals[i] - t_arrivals[j]) * c
+
+        # Calculate distance from every point on our grid to Mic i and Mic j
+        dist_i = np.sqrt((X - mics[i][0]) ** 2 + (Y - mics[i][1]) ** 2)
+        dist_j = np.sqrt((X - mics[j][0]) ** 2 + (Y - mics[j][1]) ** 2)
+
+        # The hyperbola exists wherever the difference in distances equals d_ij
+        Z = dist_i - dist_j
+
+        # Plot the specific contour line where Z == d_ij
+        # We wrap it in a try-except just in case a curve completely misses the graphed window
+        try:
+            plt.contour(X, Y, Z, levels=[d_ij], colors=[colors[idx]], alpha=0.5, linewidths=2)
+        except ValueError:
+            pass
+
+            # 5. Plot the raw intersection points calculated by our algebraic solver
+    if points:
+        pts_array = np.array(points)
+        plt.scatter(pts_array[:, 0], pts_array[:, 1], c='blue', marker='x', s=60, alpha=0.7,
+                    label='Calculated Intersections')
+
+    # 6. Plot the final estimated source (the centroid of the intersections)
+    if est_intersection is not None:
+        plt.plot(est_intersection[0], est_intersection[1], 'ro', markersize=10, label='Estimated Source')
+
+    plt.title('TDOA Hyperbolic Intersections')
+    plt.xlabel('X Coordinate (m)')
+    plt.ylabel('Y Coordinate (m)')
+    plt.grid(True, linestyle='--', alpha=0.5)
+
+    # Force the X and Y axes to scale equally so our circles/curves don't warp into ovals
+    plt.axis('equal')
+    plt.legend(loc='best')
+    plt.tight_layout()
+    plt.show()
+
+
+
 
 def main():
     # --- Execution Example with 4 Mics ---
