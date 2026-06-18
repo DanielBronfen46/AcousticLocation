@@ -4,7 +4,9 @@ import threading
 import os
 import shutil
 import re
+# pyrefly: ignore [missing-import]
 from moviepy import VideoFileClip
+# pyrefly: ignore [missing-import]
 from zeroconf import Zeroconf, ServiceBrowser
 from datetime import datetime
 
@@ -15,12 +17,16 @@ from datetime import datetime
 HARDWARE_REGISTRY = {
     "sms926b": "Amibar",     # Samsung Galaxy S24
     "sma566b": "Bronfonfon", # Samsung Galaxy A56
-    "sma505f": "Backup_Bronfonfon" # Samsung Galaxy A50
+    "sma505f": "Backup_Bronfonfon", # Samsung Galaxy A50
+    "cph2663": "Sabagon", # Realme 11 Pro
+    "sms906e": "Reem", # Samsung S23 
 }
 MIC_INDEX_MAP = {
     "Amibar": "1",
     "Bronfonfon": "2",
-    "Backup_Bronfonfon": "3"
+    "Backup_Bronfonfon": "4",
+    "Sabagon": "5",
+    "Reem":"3"
 }
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 VIDEO_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "video_recordings"))
@@ -41,7 +47,7 @@ class ADBDeviceListener:
         if info:
             self.found_services.append(info)
 
-def discover_live_network_nodes(scan_timeout=3.0):
+def discover_live_network_nodes(requested_aliases=None, scan_timeout=3.0):
     """
     Sweeps Wi-Fi for devices, connects, and reads their permanent factory 
     model numbers to bypass all Wi-Fi network abstraction issues.
@@ -50,7 +56,51 @@ def discover_live_network_nodes(scan_timeout=3.0):
     live_alias_map = {}
     adb_path = get_adb_path()
     
-    # Sweep local network to ensure all phones are bridged
+    def scan_adb_devices(current_map):
+        # Ask the ADB daemon for the device list
+        result = subprocess.run([adb_path, "devices"], capture_output=True, text=True)
+        lines = result.stdout.strip().split('\n')[1:] 
+        
+        for line in lines:
+            if not line.strip() or "offline" in line or "unauthorized" in line:
+                continue
+                
+            # Extract the endpoint (e.g., 10.40.206.172:5555 or adb-R5C...)
+            target_endpoint = line.split()[0]
+            
+            # Skip querying if we already mapped this endpoint
+            if target_endpoint in current_map.values():
+                continue
+            
+            # Ask the phone's internal OS for its factory model name
+            model_cmd = subprocess.run([adb_path, "-s", target_endpoint, "shell", "getprop", "ro.product.model"], capture_output=True, text=True)
+            raw_model = model_cmd.stdout.strip().lower()
+            
+            # Sanitize the model name (e.g., 'sm-s926b' or 'sm_s926b' becomes 'sms926b')
+            clean_model = re.sub(r"[^a-z0-9]", "", raw_model)
+            
+            if not clean_model:
+                continue
+                
+            if clean_model in HARDWARE_REGISTRY:
+                alias = HARDWARE_REGISTRY[clean_model]
+                if alias not in current_map:
+                    current_map[alias] = target_endpoint
+                    print(f" -> [MATCH SUCCESS] Bound alias '{alias}' to device model '{clean_model}' at {target_endpoint}")
+            else:
+                print(f" -> [SKIPPED] Connected device model '{clean_model}' not found in registry.")
+
+    # 1. Check already connected devices first
+    scan_adb_devices(live_alias_map)
+    
+    # Check if we have all requested aliases
+    if requested_aliases:
+        missing_aliases = set(requested_aliases) - set(live_alias_map.keys())
+        if not missing_aliases:
+            return live_alias_map
+        print(f" -> Missing requested aliases: {', '.join(missing_aliases)}. Initiating mDNS network sweep...")
+    
+    # 2. Sweep local network to ensure all phones are bridged
     zeroconf = Zeroconf()
     listener = ADBDeviceListener()
     browser = ServiceBrowser(zeroconf, "_adb._tcp.local.", listener)
@@ -62,34 +112,13 @@ def discover_live_network_nodes(scan_timeout=3.0):
         if service_info.parsed_addresses():
             ip = service_info.parsed_addresses()[0]
             target_endpoint = f"{ip}:{service_info.port}"
-            subprocess.run([adb_path, "connect", target_endpoint], capture_output=True)
+            # Only connect if not already a known endpoint
+            if target_endpoint not in live_alias_map.values():
+                subprocess.run([adb_path, "connect", target_endpoint], capture_output=True)
 
-    # Now that everything is connected, ask the ADB daemon for the device list
-    result = subprocess.run([adb_path, "devices"], capture_output=True, text=True)
-    lines = result.stdout.strip().split('\n')[1:] 
+    # 3. Scan again after connecting new endpoints
+    scan_adb_devices(live_alias_map)
     
-    for line in lines:
-        if not line.strip() or "offline" in line or "unauthorized" in line:
-            continue
-            
-        # Extract the endpoint (e.g., 10.40.206.172:5555 or adb-R5C...)
-        target_endpoint = line.split()[0]
-        
-        # Ask the phone's internal OS for its factory model name
-        model_cmd = subprocess.run([adb_path, "-s", target_endpoint, "shell", "getprop", "ro.product.model"], capture_output=True, text=True)
-        raw_model = model_cmd.stdout.strip().lower()
-        
-        # Sanitize the model name (e.g., 'sm-s926b' or 'sm_s926b' becomes 'sms926b')
-        clean_model = re.sub(r"[^a-z0-9]", "", raw_model)
-        
-        if clean_model in HARDWARE_REGISTRY:
-            alias = HARDWARE_REGISTRY[clean_model]
-            if alias not in live_alias_map:
-                live_alias_map[alias] = target_endpoint
-                print(f" -> [MATCH SUCCESS] Bound alias '{alias}' to device model '{clean_model}' at {target_endpoint}")
-        else:
-            print(f" -> [SKIPPED] Connected device model '{clean_model}' not found in registry.")
-
     return live_alias_map
 
 # ==========================================
@@ -127,16 +156,23 @@ def orchestrate_pipeline(device_ip, alias, duration, sync_barrier, master_timest
         time.sleep(0.5)
         
         if alias == "Backup_Bronfonfon":
+            camera_pkg = "com.sec.android.app.camera"
             print(f"[{alias}] Legacy device detected. Cold-booting main camera activity...")
-            run_adb(device_ip, ["shell", "am", "start", "-n", "com.sec.android.app.camera/com.sec.android.app.camera.Camera"])
+            run_adb(device_ip, ["shell", "am", "start", "-n", f"{camera_pkg}/{camera_pkg}.Camera"])
             time.sleep(3.5)
             
             print(f"[{alias}] Applying legacy UI swipe to force Video mode...")
             run_adb(device_ip, ["shell", "input", "swipe", "800", "1000", "200", "1000", "300"])
             time.sleep(1.5)
+        elif alias == "Sabagon":
+            camera_pkg = "com.oplus.camera"
+            print(f"[{alias}] Realme device detected. Driving high-level Video Capture Intent...")
+            run_adb(device_ip, ["shell", "am", "start", "-a", "android.media.action.VIDEO_CAPTURE", "-p", camera_pkg])
+            time.sleep(3.5)
         else:
+            camera_pkg = "com.sec.android.app.camera"
             print(f"[{alias}] Modern device detected. Driving high-level Video Capture Intent...")
-            run_adb(device_ip, ["shell", "am", "start", "-a", "android.media.action.VIDEO_CAPTURE", "-p", "com.sec.android.app.camera"])
+            run_adb(device_ip, ["shell", "am", "start", "-a", "android.media.action.VIDEO_CAPTURE", "-p", camera_pkg])
             time.sleep(3.5)
         
         print(f"[{alias}] Waiting at synchronization barrier for other sensors...")
@@ -175,7 +211,7 @@ def orchestrate_pipeline(device_ip, alias, duration, sync_barrier, master_timest
         run_adb(device_ip, ["shell", "rm", remote_path])
         
         extract_and_verify_audio(local_video_path, local_audio_path, alias)
-        run_adb(device_ip, ["shell", "am", "force-stop", "com.sec.android.app.camera"])
+        run_adb(device_ip, ["shell", "am", "force-stop", camera_pkg])
         print(f"[{alias}] 🎉 Asset pipeline execution complete.")
         
     except threading.BrokenBarrierError:
@@ -194,7 +230,8 @@ def capture_by_alias(devices=None):
     if not devices:
         return
         
-    live_network_map = discover_live_network_nodes()
+    requested_aliases = [alias for alias, length in devices]
+    live_network_map = discover_live_network_nodes(requested_aliases=requested_aliases)
     active_devices = [(alias, length) for alias, length in devices if alias in live_network_map]
     
     if not active_devices:

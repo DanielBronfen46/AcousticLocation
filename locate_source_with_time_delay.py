@@ -259,17 +259,36 @@ def test_2d_location():
     filedesc2 = "2026-06-16_15-44-16"
     filedesc3 = "2026-06-16_15-47-41"
     filedesc4 = "2026-06-16_23-15-14"
-    filedesc = filedesc4
 
-    calib_range = (0, 12)
-    target_range = (16, 29)
-    mics_dict = {
+    filedesc5 = "2026-06-18_22-24-18"
+    filedesc6 = "2026-06-18_22-27-22"
+    filedesc7 = "2026-06-18_22-28-57"
+    filedesc8 = "2026-06-18_23-12-54"
+    filedesc9 = "2026-06-18_23-15-19"
+    filedesc10 = "2026-06-18_23-17-26"
+    filedesc11 = "2026-06-18_23-18-39"
+    filedesc12 = "2026-06-18_23-27-01"
+    filedesc13 = "2026-06-18_23-25-42"
+    filedesc14 = "2026-06-18_23-30-45"
+
+    
+    filedesc = filedesc14
+
+    calib_range = (0, 10)
+    target_range = (20, 29)
+
+    mics_dict1 = {
         0: np.array([0.0, 0.0]),
         1: np.array([0.0, 3.0]),
         2: np.array([3.0, 0.0])
     }
+    mics_dict2 = {
+        0: np.array([1.5, 0.0]),
+        1: np.array([-1.5, 0.0]),
+        2: np.array([0.0, 3.0])
+    }
 
-    locate_source_from_audio(filedesc, mics_dict, calib_range, target_range, plot=True, verbose=False, gcc_phat=True)
+    locate_source_from_audio(filedesc, mics_dict2, calib_range, target_range, plot=False, verbose=False, gcc_phat=True)
 
 
 def main():
