@@ -88,15 +88,15 @@ def calculate_points(mics: dict, time_difs: dict):
 
 def main():
     mics = {
-        0: np.array([-2.0, -5.0]),
-        1: np.array([6.0, 3.0]),
-        2: np.array([-7.0, 7.0])
+        0: np.array([1.5, 0]),
+        1: np.array([-1.5, 0]),
+        2: np.array([0, 3])
     }
 
     time_difs = {
-        '01': 0.005,  # t0 - t1
-        '12': 0.0046,  # t1 - t2
-        '02': 0.0054  # t0 - t2
+        '01': 0.000816,  # t0 - t1
+        '12': -0.002789-0.000816,  # t1 - t2
+        '02': -0.002789  # t0 - t2
     }
 
     points = calculate_points(mics, time_difs)

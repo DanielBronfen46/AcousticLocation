@@ -75,10 +75,17 @@ def calculate_n_mic_points(mics: dict, t_arrivals: dict, plot=False):
     triplets = list(combinations(mic_ids, 3))
     
     for i, j, k in triplets:
-        # Calculate the distance differences from the arrival times dynamically
-        d_ij = (t_arrivals[i] - t_arrivals[j]) * c
-        d_ik = (t_arrivals[i] - t_arrivals[k]) * c
-        d_jk = (t_arrivals[j] - t_arrivals[k]) * c
+        def cap_d(d, m1, m2):
+            max_d = np.linalg.norm(m1 - m2) * 0.9999
+            if abs(d) > max_d:
+                return np.sign(d) * max_d
+            return d
+
+        # Calculate the distance differences from the arrival times dynamically,
+        # capping them to physically possible boundaries (prevents math failures on bad TDOA)
+        d_ij = cap_d((t_arrivals[i] - t_arrivals[j]) * c, mics[i], mics[j])
+        d_ik = cap_d((t_arrivals[i] - t_arrivals[k]) * c, mics[i], mics[k])
+        d_jk = cap_d((t_arrivals[j] - t_arrivals[k]) * c, mics[j], mics[k])
         
         # Calculate the 3 intersection points for this specific triplet
         pt1 = algebraic_intersection(mics[i], mics[j], mics[k], d_ij, d_ik)
@@ -162,10 +169,13 @@ def plot_tdoa_hyperbolas(mics, t_arrivals, points=None, est_intersection=None):
         pts_array = np.array(points)
         plt.scatter(pts_array[:, 0], pts_array[:, 1], c='blue', marker='x', s=60, alpha=0.7,
                     label='Calculated Intersections')
+        for pt in points:
+            plt.text(pt[0] + 0.1, pt[1] + 0.1, f'({pt[0]:.2f}, {pt[1]:.2f})', fontsize=9, color='blue', ha='left', va='bottom')
 
     # 6. Plot the final estimated source (the centroid of the intersections)
     if est_intersection is not None:
-        plt.plot(est_intersection[0], est_intersection[1], 'ro', markersize=10, label='Estimated Source')
+        plt.plot(est_intersection[0], est_intersection[1], 'ro', markersize=10, 
+                 label=f'Estimated Source: ({est_intersection[0]:.2f}, {est_intersection[1]:.2f})')
 
     plt.title('TDOA Hyperbolic Intersections')
     plt.xlabel('X Coordinate (m)')

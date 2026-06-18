@@ -46,7 +46,7 @@ def plot_wav_spectrogram(wav_path, nfft=1024, noverlap=None, cmap='viridis'):
 
 def find_latest_wav(directory='.'):
     """Return path to the most recently modified .wav file in directory."""
-    files = glob.glob(os.path.join(directory, '*.wav'))
+    files = glob.glob(os.path.join(directory, '**', '*.wav'), recursive=True)
     if not files:
         return None
     return max(files, key=os.path.getmtime)

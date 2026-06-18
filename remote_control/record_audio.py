@@ -204,8 +204,13 @@ def orchestrate_pipeline(device_ip, alias, duration, sync_barrier, master_timest
         
         # New clean file naming format: YYYYMMDD_HHMMSS_micX.wav
         file_base_name = f"{master_timestamp}_mic{mic_id}"
+        
+        date_folder = master_timestamp.split('_')[0]
+        local_audio_dir = os.path.join(AUDIO_DIR, date_folder, master_timestamp)
+        os.makedirs(local_audio_dir, exist_ok=True)
+        
         local_video_path = os.path.join(VIDEO_DIR, f"{file_base_name}.mp4")
-        local_audio_path = os.path.join(AUDIO_DIR, f"{file_base_name}.wav")
+        local_audio_path = os.path.join(local_audio_dir, f"{file_base_name}.wav")
         
         run_adb(device_ip, ["pull", remote_path, local_video_path])
         run_adb(device_ip, ["shell", "rm", remote_path])
