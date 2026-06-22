@@ -272,7 +272,7 @@ def test_2d_location():
     filedesc14 = "2026-06-18_23-30-45"
 
     
-    filedesc = filedesc14
+    filedesc = filedesc7
 
     calib_range = (0, 10)
     target_range = (20, 29)
@@ -288,7 +288,7 @@ def test_2d_location():
         2: np.array([0.0, 3.0])
     }
 
-    locate_source_from_audio(filedesc, mics_dict2, calib_range, target_range, plot=False, verbose=False, gcc_phat=True)
+    locate_source_from_audio(filedesc, mics_dict2, calib_range, target_range, plot=True, verbose=False, gcc_phat=True)
 
 
 def main():

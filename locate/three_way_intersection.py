@@ -85,6 +85,65 @@ def calculate_points(mics: dict, time_difs: dict):
     pt3 = algebraic_intersection(mics[2], mics[0], mics[1], -d02, -d12)
     return [pt1, pt2, pt3]
 
+def plot_three_way_hyperbolas(mics, time_difs, points=None, est_intersection=None):
+    """
+    Plots the three exact hyperbolas based on the provided explicit time differences.
+    """
+    from matplotlib import pyplot as plt
+    all_x = [m[0] for m in mics.values()]
+    all_y = [m[1] for m in mics.values()]
+
+    if est_intersection is not None:
+        all_x.append(est_intersection[0])
+        all_y.append(est_intersection[1])
+
+    padding = 3
+    x_min, x_max = min(all_x) - padding, max(all_x) + padding
+    y_min, y_max = min(all_y) - padding, max(all_y) + padding
+
+    xx = np.linspace(x_min, x_max, 400)
+    yy = np.linspace(y_min, y_max, 400)
+    X, Y = np.meshgrid(xx, yy)
+
+    plt.figure(figsize=(10, 8))
+
+    for mic_id, coord in mics.items():
+        plt.plot(coord[0], coord[1], 'ks', markersize=8)
+        plt.text(coord[0] + 0.5, coord[1] + 0.5, f'Mic {mic_id}', fontsize=12, fontweight='bold')
+
+    pairs = [(0, 1, '01'), (0, 2, '02'), (1, 2, '12')]
+    colors = plt.cm.tab10(np.linspace(0, 1, 3))
+
+    for idx, (i, j, key) in enumerate(pairs):
+        # Target distance difference based on our exact pair audio delay
+        d_ij = time_difs[key] * c
+
+        dist_i = np.sqrt((X - mics[i][0]) ** 2 + (Y - mics[i][1]) ** 2)
+        dist_j = np.sqrt((X - mics[j][0]) ** 2 + (Y - mics[j][1]) ** 2)
+
+        Z = dist_i - dist_j
+
+        plt.contour(X, Y, Z, levels=[d_ij], colors=[colors[idx]], linewidths=2)
+        
+        # Invisible plot just for legend
+        plt.plot([], [], color=colors[idx], linewidth=2, label=f'Hyperbola {i}-{j} (delay: {time_difs[key]:.6f}s)')
+
+    if points:
+        for idx, pt in enumerate(points):
+            if pt is not None:
+                plt.plot(pt[0], pt[1], 'ro', markersize=6)
+        
+    if est_intersection is not None:
+        plt.plot(est_intersection[0], est_intersection[1], 'b*', markersize=15, label='Estimated Source')
+
+    plt.title("Acoustic Source Localization (Exact 3-Way Hyperbolas)")
+    plt.xlabel("X Coordinate (meters)")
+    plt.ylabel("Y Coordinate (meters)")
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.axis('equal')
+    plt.show()
+
 
 def main():
     mics = {
@@ -100,12 +159,20 @@ def main():
     }
 
     points = calculate_points(mics, time_difs)
+    valid_points = [p for p in points if p is not None]
 
-    est_intersection = np.mean(points, axis=0)
-    print("--- Analytic Intersection Points ---")
-    for i, pt in enumerate(points):
-        print(f"Intersection {i + 1}: x = {pt[0]:.4f}, y = {pt[1]:.4f}")
-    print(f"Estimated Source Location (Average): x = {est_intersection[0]:.4f}, y = {est_intersection[1]:.4f}")
+    if valid_points:
+        est_intersection = np.mean(valid_points, axis=0)
+        print("--- Analytic Intersection Points ---")
+        for i, pt in enumerate(points):
+            if pt is not None:
+                print(f"Intersection {i + 1}: x = {pt[0]:.4f}, y = {pt[1]:.4f}")
+            else:
+                print(f"Intersection {i + 1}: None")
+        print(f"Estimated Source Location (Average): x = {est_intersection[0]:.4f}, y = {est_intersection[1]:.4f}")
+    else:
+        print("--- Analytic Intersection Points ---")
+        print("No valid intersections found.")
 
 if __name__ == '__main__':
     main()

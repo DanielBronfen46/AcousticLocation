@@ -9,9 +9,11 @@ from sound_file_handling import load_n_wav_files
 # ==========================================
 # List of batch folders to process (found in audio_recordings/YYYY-MM-DD/)
 TARGET_FILES = [
-    '2026-06-18_23-12-54',
+    # '2026-06-18_23-12-54',
     '2026-06-18_23-15-19',
-    '2026-06-18_23-18-39'
+    '2026-06-18_23-18-39',
+    # '2026-06-18_23-30-45',
+
 ]
 
 # Physical microphone coordinates in meters [x, y]
