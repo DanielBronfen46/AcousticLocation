@@ -401,7 +401,7 @@ def test_many_2d_locations(filedesc_list, mics_dict, calib_range, target_range, 
     for fd in filedesc_list:
         try:
             est_loc, _ = locate_source_from_audio(
-                fd, mics_dict, calib_range, target_range, preprocessing_parameters=preprocessing_parameters, plot=False, verbose=False, gcc_phat=gcc_phat
+                fd, mics_dict, calib_range, target_range, preprocessing_parameters=preprocessing_parameters, plot=False, verbose=True, gcc_phat=gcc_phat
             )
             if est_loc is not None:
                 dist = np.linalg.norm(est_loc - true_point)
