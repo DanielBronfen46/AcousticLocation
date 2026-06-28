@@ -1,3 +1,4 @@
+from scipy.linalg import _special_matrices
 import csv
 import os
 import time
@@ -6,145 +7,95 @@ import time
 import numpy as np
 from scipy import signal
 import matplotlib.pyplot as plt
-from scipy.fft import fft, ifft
-from scipy.signal import hilbert, correlate, correlation_lags
+from scipy.fft import fft, ifft, fftshift
+from scipy.signal import hilbert, correlate, correlation_lags, butter, filtfilt
 
 from plotting_functions import plot_both_signals, plot_both_signals_around_max, compare_two_signals_at_multiple_points, \
     plot_n_signals, compare_n_signals_at_multiple_points, plot_n_signals_around_max, plot_before_after_comparison
 from sound_file_handling import FS, load_two_wav_files
 
 
+def butter_bandpass_filter(signals, lowcut=500, highcut=8000, fs=44100, order=5):
+    nyq = 0.5 * fs
+    low = lowcut / nyq
+    high = highcut / nyq
+    b, a = butter(order, [low, high], btype='band')
+    return [filtfilt(b, a, sig) for sig in signals]
 
-def _calculate_cross_correlation_with_gcc(sig1, sig2, fs=FS, window_sec=0.05, verbose=False):
-    """
-    Two-Stage Alignment:
-    1. Coarse alignment using Hilbert envelopes (fixes massive hardware sync issues).
-    2. Fine alignment using GCC-PHAT on a single isolated clap.
-    """
+def tkeo(sig):
+    """Calculates the Teager-Kaiser Energy Operator of a signal."""
+    energy = np.zeros_like(sig)
+    # The formula is: E(n) = x(n)^2 - x(n-1)*x(n+1)
+    energy[1:-1] = sig[1:-1]**2 - sig[:-2] * sig[2:]
+    return energy
 
-    # ==========================================
-    # STAGE 1: COARSE ALIGNMENT (Envelope)
-    # ==========================================
-    # Get the "shape" of the audio, ignoring the high-frequency sound waves
-    env1 = np.abs(hilbert(sig1))
-    env2 = np.abs(hilbert(sig2))
+def calc_tkeo(signals):
+    return [tkeo(sig) for sig in signals]
+    
+def calc_envelopes(signals):
+    return [np.abs(hilbert(sig)) for sig in signals]
 
-    # Standard correlation on the envelopes to find the macro hardware delay
-    coarse_corr = correlate(env2, env1, mode='full', method='fft')
-    lags = correlation_lags(len(env1), len(env2), mode='full')
-    coarse_lag = lags[np.argmax(coarse_corr)]
+def svd_denoise_matrix(matrix, energy_threshold=0.95):
+    """CPU-accelerated Singular Value Decomposition using NumPy."""
+    # Compute SVD (full_matrices=False gives the "economy" size SVD)
+    U, S, Vh = np.linalg.svd(matrix, full_matrices=False)
 
-    if verbose:
-        print(f"-> Stage 1 (Cross Correlation): Shifted by {coarse_lag} samples ({coarse_lag/fs:.4f}s)")
+    # Calculate cumulative energy to find the threshold elbow
+    energy = S ** 2
+    total_energy = np.sum(energy)
+    cumulative_energy = np.cumsum(energy) / total_energy
 
-    # Temporarily shift sig2 by the coarse lag so the claps physically overlap
-    if coarse_lag > 0:
-        sig1_aligned = sig1
-        sig2_aligned = sig2[coarse_lag:]
-    elif coarse_lag < 0:
-        sig1_aligned = sig1[abs(coarse_lag):]
-        sig2_aligned = sig2
+    # Find how many singular values to keep
+    # np.argmax returns the first index where the condition is True
+    k_keep = np.argmax(cumulative_energy >= energy_threshold) + 1
+
+    # Zero out the noise
+    S_clean = np.zeros_like(S)
+    S_clean[:k_keep] = S[:k_keep]
+
+    # Reconstruct the matrix: U * diag(S) * Vh
+    clean_matrix = U @ np.diag(S_clean) @ Vh
+    return clean_matrix
+
+
+def svd_denoise_signals(signals):
+    matrix = np.vstack(signals)
+
+    # Run the denoising algorithm
+    cleaned_matrix = svd_denoise_matrix(matrix)
+
+    # Unpack the matrix back into a list of 1D arrays
+    # We iterate over the rows (cleaned_matrix.shape[0] is the number of mics)
+    signals = [cleaned_matrix[i, :] for i in range(cleaned_matrix.shape[0])]
+
+    return signals
+
+def normalize_signals(signals):
+    return [sig / (np.max(np.abs(sig)) + 1e-15) for sig in signals]
+
+def process_signals_for_correlation(signals, preprocessing_parameters, gcc_phat=False):
+    if preprocessing_parameters is None:
+        env = False
+        bandpass = False
+        normalize = False
     else:
-        sig1_aligned = sig1
-        sig2_aligned = sig2
+        env = preprocessing_parameters['env']
+        bandpass = preprocessing_parameters['bandpass']
+        normalize = preprocessing_parameters['normalize']
 
-    # Make them equal length for Stage 2
-    min_len = min(len(sig1_aligned), len(sig2_aligned))
-    sig1_aligned = sig1_aligned[:min_len]
-    sig2_aligned = sig2_aligned[:min_len]
+    if bandpass:
+        signals = butter_bandpass_filter(signals)
+        
+    if env and not gcc_phat:
+        signals = calc_envelopes(signals)
+        
+    if normalize:
+        signals = normalize_signals(signals)
+
+    return signals
 
 
-    # ==========================================
-    # STAGE 2: FINE ALIGNMENT (GCC-PHAT)
-    # ==========================================
-    # Now that the claps overlap, find the absolute loudest peak
-    peak_idx = np.argmax(np.abs(sig1_aligned))
-
-    # Crop a very tight window (e.g., 0.05s) around that single peak
-    half_window = int(window_sec * fs)
-    start_idx = max(0, peak_idx - half_window)
-    end_idx = min(len(sig1_aligned), peak_idx + half_window)
-
-    sig1_crop = sig1_aligned[start_idx:end_idx]
-    sig2_crop = sig2_aligned[start_idx:end_idx]
-
-    # Run GCC-PHAT on this tiny, single-clap window
-    n = len(sig1_crop) + len(sig2_crop) - 1
-    n_fft = 1 << (n - 1).bit_length()
-
-    SIG1 = fft(sig1_crop, n=n_fft)
-    SIG2 = fft(sig2_crop, n=n_fft)
-
-    R = SIG1 * np.conj(SIG2)
-    magnitude = np.abs(R)
-    threshold = np.max(magnitude) * 1e-3
-
-    cc = np.real(ifft(R / np.maximum(magnitude, threshold)))
-    cc = np.concatenate((cc[-n_fft // 2:], cc[:n_fft // 2]))
-
-    fine_lag = np.argmax(cc) - (n_fft // 2)
-
-    if verbose:
-        print(f"-> Stage 2 (GCC-PHAT): Sub-adjusted by {fine_lag} samples ({fine_lag/fs:.6f}s)")
-
-    # ==========================================
-    # COMBINE LAGS
-    # ==========================================
-    # The total true delay is the massive hardware shift PLUS the micro acoustic shift
-    total_lag = coarse_lag + fine_lag
-
-    save_stats(sig1, sig2, total_lag)
-
-    return total_lag
-
-def _crop_around_max_and_correlate(sig1, sig2, fs=FS, window_sec=0.05, verbose=False, gcc_phat=False):
-    """
-    Crops both signals around their independent maximums, passes the clean
-    crops to the existing cross-correlation function, and calculates the true lag.
-    """
-    half_window = int(window_sec * fs)
-
-    # 1. Crop Mic 1 around its absolute maximum
-    peak1_idx = np.argmax(np.abs(sig1))
-    start1 = max(0, peak1_idx - half_window)
-    end1 = min(len(sig1), peak1_idx + half_window)
-    crop1 = sig1[start1:end1]
-
-    # 2. Crop Mic 2 around its absolute maximum
-    peak2_idx = np.argmax(np.abs(sig2))
-    start2 = max(0, peak2_idx - half_window)
-    end2 = min(len(sig2), peak2_idx + half_window)
-    crop2 = sig2[start2:end2]
-
-    # 3. Pass the clean, single-clap crops to your existing function
-    # (Assuming calculate_cross_correlation is already imported)
-    # We pass gcc_phat=False or True based on which method you currently want to test
-    crop_lag = calculate_cross_correlation(crop1, crop2, fs=fs, verbose=verbose, gcc_phat=gcc_phat)
-
-    # 4. Reconstruct the global delay
-    # The lag returned is the micro-delay between the two crops.
-    # To get the true delay between the original 30-second files,
-    # we must add the difference in where we started cutting.
-    index_difference = start2 - start1
-    true_lag = crop_lag + index_difference
-
-    if verbose:
-        print("-" * 30)
-        print("CROPPING STATS:")
-        print(f"Mic 1 cut at index: {start1}")
-        print(f"Mic 2 cut at index: {start2}")
-        print(f"Cut Difference: {index_difference} samples")
-        print(f"Crop-to-Crop Lag: {crop_lag} samples")
-        print(f"-> Final True Lag: {true_lag} samples ({true_lag/fs:.5f}s)")
-        print("-" * 30)
-
-    return true_lag
-
-def calculate_cross_correlation(sig1 ,sig2, fs=FS, verbose=False, gcc_phat=False):
-
-    if gcc_phat:
-        return _calculate_cross_correlation_with_gcc(sig1, sig2, verbose=verbose)
-
+def _calculate_regular_cross_correlation(sig1, sig2, fs=FS, verbose=False):
     # 1. Perform the cross-correlation
     # We use method='fft' because doing this in the time domain would take forever
     correlation = signal.correlate(sig2, sig1, mode='full', method='fft')
@@ -163,8 +114,8 @@ def calculate_cross_correlation(sig1 ,sig2, fs=FS, verbose=False, gcc_phat=False
     if verbose:
 
         print("-" * 30)
-        print(f"Delay in samples: {lag_in_samples}")
-        print(f"Delay in seconds: {delay_in_seconds:.5f}s")
+        print("Regular cross correlation results:")
+        print(f"Delay in samples: {lag_in_samples}, Delay in seconds: {delay_in_seconds:.5f}s")
 
         # 5. Interpret the results
         if lag_in_samples > 0:
@@ -173,30 +124,144 @@ def calculate_cross_correlation(sig1 ,sig2, fs=FS, verbose=False, gcc_phat=False
             print("Result: Mic 2 heard the clap first.")
         else:
             print("Result: Incredible! The microphones are perfectly aligned.")
-        print(f"len_sig1: {len(sig1)}, len_sig2: {len(sig2)}")
         print("-" * 30)
 
-        lags_in_seconds = lags / fs
 
-        # We plot the absolute value of the correlation to clearly see the magnitude peak
-        plt.figure(figsize=(10, 4))
-        plt.plot(lags_in_seconds, np.abs(correlation), color='purple', alpha=0.8)
-
-        # Draw a vertical dashed red line exactly where the maximum peak occurs
-        plt.axvline(x=delay_in_seconds, color='red', linestyle='--', linewidth=2,
-                    label=f'Calculated Delay: {delay_in_seconds:.5f}s')
-
-        plt.title("Cross-Correlation vs. Delay Time")
-        plt.xlabel("Delay (seconds)")
-        plt.ylabel("Correlation Magnitude")
-        plt.grid(True, linestyle='--', alpha=0.6)
-        plt.legend(loc="upper right")
-        plt.tight_layout()
-        plt.show()
+        # # We plot the absolute value of the correlation to clearly see the magnitude peak
+        # lags_in_seconds = lags / fs
+        # plt.figure(figsize=(10, 4))
+        # plt.plot(lags_in_seconds, np.abs(correlation), color='purple', alpha=0.8)
+        #
+        # # Draw a vertical dashed red line exactly where the maximum peak occurs
+        # plt.axvline(x=delay_in_seconds, color='red', linestyle='--', linewidth=2,
+        #             label=f'Calculated Delay: {delay_in_seconds:.5f}s')
+        #
+        # plt.title("Cross-Correlation vs. Delay Time")
+        # plt.xlabel("Delay (seconds)")
+        # plt.ylabel("Correlation Magnitude")
+        # plt.grid(True, linestyle='--', alpha=0.6)
+        # plt.legend(loc="upper right")
+        # plt.tight_layout()
+        # plt.show()
 
     save_stats(sig1, sig2, lag_in_samples)
 
     return lag_in_samples
+
+def _calculate_gcc_phat(sig1, sig2, fs=FS, verbose=False):
+
+    n = len(sig1) + len(sig2) - 1
+    n_fft = 1 << (n - 1).bit_length()
+
+    SIG1 = fft(sig1, n=n_fft)
+    SIG2 = fft(sig2, n=n_fft)
+
+    # Calculate a dynamic threshold (e.g., 1% of the maximum magnitude)
+    cross_power = SIG1 * np.conj(SIG2)
+    cross_power_mag = np.abs(cross_power)
+    
+    # 0.01 to 0.05 is a standard sweet spot for noisy environments
+    threshold = 0.01 * np.max(cross_power_mag) 
+    
+    # Use the threshold to regularize the phase transform denominator
+    phat_weight = cross_power / (cross_power_mag + threshold)
+
+    cc = np.real(fftshift(ifft(phat_weight)))
+
+    # Find peak
+    lag_in_samples = np.argmax(cc) - (n_fft // 2)
+
+    if verbose:
+
+        print("-" * 30)
+        print("GCC-PHAT results:")
+        delay_in_seconds = lag_in_samples / fs
+        print(f"Delay in samples: {lag_in_samples}, Delay in seconds: {delay_in_seconds:.5f}s")
+
+        # 5. Interpret the results
+        if lag_in_samples > 0:
+            print("Result: Mic 1 heard the clap first.")
+        elif lag_in_samples < 0:
+            print("Result: Mic 2 heard the clap first.")
+        else:
+            print("Result: Incredible! The microphones are perfectly aligned.")
+        print("-" * 30)
+        # # --- PLOTTING CODE ---
+        # # Generate the x-axis (lags in seconds)
+        # lags = np.arange(-n_fft // 2, n_fft // 2)
+        # lags_in_seconds = lags / fs
+        #
+        # plt.figure(figsize=(10, 4))
+        # # Plot the raw GCC-PHAT correlation data
+        # plt.plot(lags_in_seconds, cc, color='teal', alpha=0.8)
+        #
+        # # Draw a vertical dashed red line at the peak
+        # plt.axvline(x=delay_in_seconds, color='red', linestyle='--', linewidth=2,
+        #             label=f'Peak Delay: {delay_in_seconds:.5f}s', alpha=0.5)
+        #
+        # plt.title("GCC-PHAT Correlation Magnitude vs. Delay")
+        # plt.xlabel("Delay (seconds)")
+        # plt.ylabel("Correlation Magnitude")
+        # plt.grid(True, linestyle='--', alpha=0.6)
+        # plt.legend(loc="upper right")
+        # plt.tight_layout()
+        # plt.show()
+
+
+    return lag_in_samples
+
+def _calculate_regular_then_gcc_phat(sig1, sig2, fs=FS, verbose=False, env=False):
+    if verbose:
+        print("~" * 30)
+        print("Calculating regular cross correlation then GCC-PHAT:")
+
+    if env:
+        env1, env2 = calc_envelopes([sig1, sig2])
+        coarse_lag = _calculate_regular_cross_correlation(env1, env2, fs=fs, verbose=verbose)
+    else:
+        coarse_lag = _calculate_regular_cross_correlation(sig1, sig2, fs=fs, verbose=verbose)
+
+    aligned_sig1, aligned_sig2 = align_signals_given_lag(sig1, sig2, coarse_lag)
+
+    sig1_crop, sig2_crop = _crop_two_aligned_signals_around_max(aligned_sig1, aligned_sig2, fs=fs)
+
+    if env:
+        sig1_crop = np.abs(hilbert(sig1_crop))
+        sig2_crop = np.abs(hilbert(sig2_crop))
+
+    hann_window = np.hanning(len(sig1_crop))
+    sig1_crop = sig1_crop * hann_window
+    sig2_crop = sig2_crop * hann_window
+
+    fine_lag = _calculate_gcc_phat(sig1_crop, sig2_crop, verbose=verbose)
+
+    if verbose:
+        print("~" * 30)
+
+    return coarse_lag + fine_lag
+
+def _crop_two_aligned_signals_around_max(sig1_aligned, sig2_aligned, fs=FS, window_sec=0.005):
+    # Now that the claps overlap, find the absolute loudest peak
+    peak_idx = np.argmax(np.abs(sig1_aligned))
+
+    # Crop a very tight window (e.g., 0.05s) around that single peak
+    half_window = int(window_sec * fs)
+    start_idx = max(0, peak_idx - half_window)
+    end_idx = min(len(sig1_aligned), peak_idx + half_window)
+
+    sig1_crop = sig1_aligned[start_idx:end_idx]
+    sig2_crop = sig2_aligned[start_idx:end_idx]
+
+    return sig1_crop, sig2_crop
+
+def calculate_cross_correlation(sig1 ,sig2, preprocessing_parameters, fs=FS, verbose=False, gcc_phat=False, env=False, bandpass=False, normalize=False, svd=False):
+    
+    sig1, sig2 = process_signals_for_correlation([sig1, sig2], preprocessing_parameters, gcc_phat)
+    if gcc_phat:
+        #return _calculate_gcc_phat(sig1, sig2, fs=fs, verbose=verbose)
+        return _calculate_regular_then_gcc_phat(sig1, sig2, fs=fs, verbose=verbose, env=env)
+
+    return _calculate_regular_cross_correlation(sig1, sig2, fs=fs, verbose=verbose)
 
 
 
@@ -234,8 +299,8 @@ def align_signals_given_lag(sig1, sig2, lag_in_samples):
 
     return aligned_sig1, aligned_sig2
 
-def align_two_signals(sig1, sig2, plot=True, verbose=False, gcc_phat=False):
-    lag_in_samples = calculate_cross_correlation(sig1, sig2, verbose=verbose, gcc_phat=gcc_phat)
+def align_two_signals(sig1, sig2, preprocessing_parameters, plot=True, verbose=False, gcc_phat=False):
+    lag_in_samples = calculate_cross_correlation(sig1, sig2, preprocessing_parameters=preprocessing_parameters, verbose=verbose, gcc_phat=gcc_phat)
 
     aligned1, aligned2 = align_signals_given_lag(sig1, sig2, lag_in_samples)
 
@@ -243,11 +308,11 @@ def align_two_signals(sig1, sig2, plot=True, verbose=False, gcc_phat=False):
         signals = [sig1, sig2]
         aligned = [aligned1, aligned2]
         plot_before_after_comparison(signals, aligned)
-        compare_two_signals_at_multiple_points(aligned1, aligned2, n_points=6)
+
 
     return aligned1, aligned2, lag_in_samples
 
-def calculate_lags_and_align_n_signals(signals, fs=FS, verbose=False, gcc_phat=False):
+def calculate_lags_and_align_n_signals(signals, preprocessing_parameters, fs=FS, verbose=False, gcc_phat=False):
     """
     Aligns a list of N signals using signals[0] as the reference.
     """
@@ -258,7 +323,7 @@ def calculate_lags_and_align_n_signals(signals, fs=FS, verbose=False, gcc_phat=F
     for i in range(1, n):
         print(f"CALCULATING LAG OF MIC {i}:")
         # We set verbose=False so it calculates quietly in the background
-        lags[i] = calculate_cross_correlation(signals[0], signals[i], fs=fs, verbose=verbose, gcc_phat=gcc_phat)
+        lags[i] = calculate_cross_correlation(signals[0], signals[i], fs=fs, verbose=verbose, gcc_phat=gcc_phat, preprocessing_parameters=preprocessing_parameters)
 
     # 2. Normalize the lags into start indices
     # A negative lag means a signal heard the sound EARLIER than the reference.
@@ -281,13 +346,13 @@ def calculate_lags_and_align_n_signals(signals, fs=FS, verbose=False, gcc_phat=F
 
     return aligned_signals, lags
 
-def align_n_signals(signals, plot=True, verbose=False, gcc_phat=False):
+def align_n_signals(signals, preprocessing_parameters, plot=True, verbose=False, gcc_phat=False):
 
-    aligned_signals, lags = calculate_lags_and_align_n_signals(signals, verbose=verbose, gcc_phat=gcc_phat)
+    aligned_signals, lags = calculate_lags_and_align_n_signals(signals, preprocessing_parameters=preprocessing_parameters, verbose=verbose, gcc_phat=gcc_phat)
 
     if plot:
         plot_before_after_comparison(signals, aligned_signals)
-        compare_n_signals_at_multiple_points(aligned_signals, n_points=4)
+
 
     return aligned_signals, lags
 
@@ -332,9 +397,7 @@ def load_and_align(file_desc):
 
 
 def main():
-    filedesc1 = "20260609_173250"
-    filedesc2 = "20260609_180357"
-    load_and_align(filedesc2)
+    pass
 
 if __name__ == "__main__":
     main()

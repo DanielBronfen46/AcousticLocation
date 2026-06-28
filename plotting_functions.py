@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
-from archive.recording import FS
+from sound_file_handling import FS
 
 def plot_signal(signal_data, fs=FS, title="Audio Signal"):
     """
@@ -349,3 +349,5 @@ def plot_before_after_comparison(signals_before, signals_after, fs=FS, zoom_wind
 
     plt.tight_layout()
     plt.show()
+
+    #compare_n_signals_at_multiple_points(aligned_signals, n_points=4)
