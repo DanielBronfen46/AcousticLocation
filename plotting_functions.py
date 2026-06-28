@@ -286,12 +286,13 @@ def compare_n_signals_at_multiple_points(signals, n_points=6, fs=FS, zoom_window
     plt.show()
 
 
-def plot_before_after_comparison(signals_before, signals_after, fs=FS, zoom_window=0.02):
+def plot_before_after_comparison(signals_before, signals_after, fs=FS, zoom_window=0.02, suptitle="Before / After Alignment Comparison"):
     """
     Creates a 2x2 subplot grid comparing N signals before and after alignment.
     Top row: Full signals. Bottom row: Zoomed-in signals around the reference peak.
     """
     fig, axes = plt.subplots(2, 2, figsize=(16, 8))
+    fig.suptitle(suptitle, fontsize=14, fontweight='bold')
     half_window = int((zoom_window * fs) / 2)
 
     # -----------------------------------------------------

@@ -561,7 +561,7 @@ def run_localization_batch(config: LocalizerConfig) -> None:
             mic_1, mic_2, mic_3, 
             mics_dict=config.mics_dict,
             calib_window=(0, 10),    # Look for the hardware sync clap here
-            target_window=(20, 29),  # Look for the target sound here
+            target_window=(30, 39),  # Look for the target sound here
             plot=config.plot_steps,
             favor_center=config.favor_center,
             isolate_target=config.isolate_target
@@ -621,9 +621,9 @@ if __name__ == "__main__":
     # Configuring mic positions
     CONFIG = LocalizerConfig(
         mics_dict={
-            0: np.array([1.5, 0.0]),
-            1: np.array([-1.5, 0.0]),
-            2: np.array([0.0, 3.0])
+            0: np.array([0, 0.0]),
+            1: np.array([2, 0.0]),
+            2: np.array([0.0, 2.2])
         },
         target_files=recordings,
         plot_steps=False,

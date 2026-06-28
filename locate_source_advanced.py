@@ -31,6 +31,7 @@ from alignment import (
 # Import localization solvers
 from locate.three_way_intersection import calculate_points, plot_three_way_hyperbolas
 from locate.n_mics_intersection import calculate_n_mic_points
+from plotting_functions import plot_n_signals, plot_n_signals_around_max, plot_before_after_comparison
 
 # ==========================================
 # ADVANCED PEAK SELECTION
@@ -160,7 +161,7 @@ def plot_advanced_correlations(cc_data, max_acoustic_delay=None, fs=FS, title='C
         
         if max_acoustic_delay is not None:
             max_ac_sec = max_acoustic_delay / fs
-            ax.set_xlim(-max_ac_sec * 2, max_ac_sec * 2)
+            ax.set_xlim(-max_ac_sec * 5, max_ac_sec * 5)
             
     axs[-1].set_xlabel("Delay (seconds)")
     plt.tight_layout()
@@ -204,6 +205,22 @@ def get_t_arrivals_advanced(
     
     print(f"Hardware Sync Offsets -> Mic 1-2: {offset_0_1} | Mic 1-3: {offset_0_2} | Mic 2-3: {offset_1_2}")
     
+    if plot:
+        # Align calib_signals using the computed hardware offsets (lags relative to mic 0 are 0, offset_0_1, offset_0_2)
+        calib_lags = [0, offset_0_1, offset_0_2]
+        min_lag = min(calib_lags)
+        start_indices = [lag - min_lag for lag in calib_lags]
+        
+        aligned_calib = []
+        for i in range(len(calib_signals)):
+            start_idx = start_indices[i]
+            aligned_calib.append(calib_signals[i][start_idx:])
+            
+        min_len = min(len(sig) for sig in aligned_calib)
+        aligned_calib = [sig[:min_len] for sig in aligned_calib]
+        
+        plot_before_after_comparison(calib_signals, aligned_calib, fs=fs, suptitle="Calibration Signals Alignment Comparison")
+    
     # --- PHASE 2: Target Measurement (Acoustic Time of Flight) ---
     c, d = target_range
     target_start, target_end = int(c * fs), int(d * fs)
@@ -212,6 +229,10 @@ def get_t_arrivals_advanced(
     if isolate_target:
         print("Isolating target event window...")
         target_signals = isolate_target_event(target_signals, window_sec=1.0, fs=fs)
+        
+    if plot:
+        plot_n_signals(target_signals, title="Isolated Target Waveforms (Full 1.0s Window)")
+        plot_n_signals_around_max(target_signals, title="Isolated Target Waveforms (Zoomed around Clap)")
         
     # Calculate physical distances and max possible delay limits
     c_sound = 343.0  # Speed of sound m/s
@@ -347,6 +368,21 @@ def get_t_arrivals_advanced(
     }
     
     if plot:
+        # Align targets using true delays relative to mic 0
+        target_lags = [0, true_samples_01, true_samples_02]
+        min_lag = min(target_lags)
+        start_indices = [lag - min_lag for lag in target_lags]
+        
+        aligned_targets = []
+        for i in range(len(target_signals)):
+            start_idx = start_indices[i]
+            aligned_targets.append(target_signals[i][start_idx:])
+            
+        min_len = min(len(sig) for sig in aligned_targets)
+        aligned_targets = [sig[:min_len] for sig in aligned_targets]
+        
+        plot_before_after_comparison(target_signals, aligned_targets, fs=fs, suptitle="Target Signals Alignment Comparison")
+
         plot_data = [
             {'label': 'Mic 1 vs Mic 2', 'cc': cc_01, 'lags': lags_01, 'raw_tdoa': raw_tdoa_01, 'offset': offset_0_1},
             {'label': 'Mic 1 vs Mic 3', 'cc': cc_02, 'lags': lags_02, 'raw_tdoa': raw_tdoa_02, 'offset': offset_0_2},
@@ -413,8 +449,8 @@ def locate_source_advanced_from_audio(
     else:
         valid_points = [p for p in points if p is not None]
         
-    if plot and valid_points:
-        est = np.mean(valid_points, axis=0)
+    if plot:
+        est = np.mean(valid_points, axis=0) if valid_points else None
         plot_three_way_hyperbolas(mics_dict, time_difs, points=points, est_intersection=est)
         
     if valid_points:
@@ -610,8 +646,51 @@ def test_2d_location():
     optimize_preprocessing_parameters(filedesc_list, mics_dict2, calib_range, target_range, true_point)
 
 
+def test_2026_06_28_recordings(gcc_phat=False, plot=True, verbose=True):
+    # Set path directory to test files
+    sound_file_handling.OUTPUT_FOLDER = "audio_recordings"
+    
+    filedesc_list = [
+        #"2026-06-28_13-21-46",
+        "2026-06-28_13-24-34",
+        "2026-06-28_13-25-54"
+    ]
+
+    mics_dict = {
+        0: np.array([0.0, 0.0]),
+        1: np.array([2.0, 0.0]),
+        2: np.array([0.0, 2.2])
+    }
+
+    calib_range = (0, 10)
+    target_range = (30, 39)
+
+    preprocessing_parameters = {
+        'env': not gcc_phat,
+        'bandpass': True,
+        'normalize': True,
+    }
+
+    print(f"\nTesting 2026-06-28 recordings (gcc_phat={gcc_phat})...")
+    for fd in filedesc_list:
+        try:
+            print(f"\nProcessing {fd}...")
+            est_loc, _ = locate_source_advanced_from_audio(
+                fd, mics_dict, calib_range, target_range, 
+                preprocessing_parameters=preprocessing_parameters, 
+                plot=plot, verbose=verbose, gcc_phat=gcc_phat,
+                favor_center=True, isolate_target=True
+            )
+            if est_loc is not None:
+                print(f"File {fd}: Estimated point = [{est_loc[0]:.4f}, {est_loc[1]:.4f}]")
+            else:
+                print(f"File {fd}: Estimation failed.")
+        except Exception as e:
+            print(f"File {fd}: Error ({e})")
+
+
 def main():
-    test_2d_location()
+    test_2026_06_28_recordings()
 
 
 if __name__ == "__main__":
