@@ -19,14 +19,16 @@ HARDWARE_REGISTRY = {
     "sma566b": "Bronfonfon", # Samsung Galaxy A56
     "sma505f": "Backup_Bronfonfon", # Samsung Galaxy A50
     "cph2663": "Sabagon", # Realme 11 Pro
-    "sms906e": "Reem", # Samsung S23 
+    "sms906e": "Reem", # Samsung S23
+    "sms711b" : "Ayala" 
 }
 MIC_INDEX_MAP = {
     "Amibar": "1",
     "Bronfonfon": "2",
     "Backup_Bronfonfon": "4",
-    "Sabagon": "5",
-    "Reem":"3"
+    "Sabagon": "6",
+    "Reem":"5",
+    "Ayala":"3"
 }
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 VIDEO_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "video_recordings"))
