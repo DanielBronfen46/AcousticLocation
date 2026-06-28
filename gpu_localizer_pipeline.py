@@ -352,9 +352,9 @@ class GPUAcousticLocalizer:
                 fs=self.fs, title="1. Calibration Window Signals (Raw)", zoom_window=0.05
             )
             
-            offset_1_2, cc_calib_1_2, p_calib_1_2 = self.gcc_phat(calib_1, calib_2, return_cc=True)
-            offset_1_3, cc_calib_1_3, p_calib_1_3 = self.gcc_phat(calib_1, calib_3, return_cc=True)
-            offset_2_3, cc_calib_2_3, p_calib_2_3 = self.gcc_phat(calib_2, calib_3, return_cc=True)
+            offset_1_2, cc_calib_1_2, p_calib_1_2,_ = self.gcc_phat(calib_1, calib_2, return_cc=True)
+            offset_1_3, cc_calib_1_3, p_calib_1_3,_ = self.gcc_phat(calib_1, calib_3, return_cc=True)
+            offset_2_3, cc_calib_2_3, p_calib_2_3,_ = self.gcc_phat(calib_2, calib_3, return_cc=True)
             
             # 2. CC graphs of the whole period we are correlating at the start
             cc_data_calib = [
@@ -420,9 +420,9 @@ class GPUAcousticLocalizer:
         
         if plot:
             # Visualization uses the full 9-second clip
-            _, cc_full_1_2, _ = self.gcc_phat(full_1, full_2, return_cc=True, expected_delay=offset_1_2, max_deviation=max_acoustic_delay, favor_center=favor_center, max_phys_delay=max_phys_delay)
-            _, cc_full_1_3, _ = self.gcc_phat(full_1, full_3, return_cc=True, expected_delay=offset_1_3, max_deviation=max_acoustic_delay, favor_center=favor_center, max_phys_delay=max_phys_delay)
-            _, cc_full_2_3, _ = self.gcc_phat(full_2, full_3, return_cc=True, expected_delay=offset_2_3, max_deviation=max_acoustic_delay, favor_center=favor_center, max_phys_delay=max_phys_delay)
+            _, cc_full_1_2, _, _ = self.gcc_phat(full_1, full_2, return_cc=True, expected_delay=offset_1_2, max_deviation=max_acoustic_delay, favor_center=favor_center, max_phys_delay=max_phys_delay)
+            _, cc_full_1_3, _, _ = self.gcc_phat(full_1, full_3, return_cc=True, expected_delay=offset_1_3, max_deviation=max_acoustic_delay, favor_center=favor_center, max_phys_delay=max_phys_delay)
+            _, cc_full_2_3, _, _ = self.gcc_phat(full_2, full_3, return_cc=True, expected_delay=offset_2_3, max_deviation=max_acoustic_delay, favor_center=favor_center, max_phys_delay=max_phys_delay)
             
             cc_data = [
                 (cc_full_1_2, raw_tdoa_1_2, offset_1_2),
@@ -438,8 +438,10 @@ class GPUAcousticLocalizer:
         true_samples_2_3 = raw_tdoa_2_3 - offset_2_3
         
         if plot:
-            pass # Removed aligned spectrograms plot per user request
-
+            target_matrix = torch.stack([clean_1, clean_2, clean_3])
+            lags_calib = [0, offset_1_2, offset_1_3]
+            self._plot_aligned_signals(target_matrix, lags_calib, "6. Target Event Signals (After Calibration)")
+            self._plot_aligned_spectrograms(target_matrix, lags_calib, "7. Target Event Spectrograms (After Calibration)")
         # --- TDOA Self-Consistency Check & Correction ---
         # By definition: t(1→3) = t(1→2) + t(2→3)
         # If one measurement is inconsistent with the other two, it likely picked a
@@ -612,21 +614,22 @@ def run_localization_batch(config: LocalizerConfig) -> None:
 if __name__ == "__main__":
     import os
     
-    date_dir = "audio_recordings_augmented/2026-06-18"
+    date_dir = "audio_recordings/2026-06-28"
     recordings = tuple(
         d for d in sorted(os.listdir(date_dir)) 
         if os.path.isdir(os.path.join(date_dir, d))
     ) if os.path.exists(date_dir) else ()
+    recordings = recordings[-1:]
 
     # Configuring mic positions
     CONFIG = LocalizerConfig(
         mics_dict={
-            0: np.array([0, 0.0]),
-            1: np.array([2, 0.0]),
+            0: np.array([0.0, 0.0]),
+            1: np.array([2.0, 0.0]),
             2: np.array([0.0, 2.2])
         },
         target_files=recordings,
-        plot_steps=False,
+        plot_steps=True,
         isolate_target=False
     )
     run_localization_batch(CONFIG)
