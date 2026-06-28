@@ -95,7 +95,7 @@ def process_signals_for_correlation(signals, preprocessing_parameters, gcc_phat=
     return signals
 
 
-def _calculate_regular_cross_correlation(sig1, sig2, fs=FS, verbose=False):
+def _calculate_regular_cross_correlation(sig1, sig2, fs=FS, verbose=False, return_cc=False):
     # 1. Perform the cross-correlation
     # We use method='fft' because doing this in the time domain would take forever
     correlation = signal.correlate(sig2, sig1, mode='full', method='fft')
@@ -146,9 +146,11 @@ def _calculate_regular_cross_correlation(sig1, sig2, fs=FS, verbose=False):
 
     save_stats(sig1, sig2, lag_in_samples)
 
+    if return_cc:
+        return lag_in_samples, correlation, lags
     return lag_in_samples
 
-def _calculate_gcc_phat(sig1, sig2, fs=FS, verbose=False):
+def _calculate_gcc_phat(sig1, sig2, fs=FS, verbose=False, return_cc=False):
 
     n = len(sig1) + len(sig2) - 1
     n_fft = 1 << (n - 1).bit_length()
@@ -156,8 +158,8 @@ def _calculate_gcc_phat(sig1, sig2, fs=FS, verbose=False):
     SIG1 = fft(sig1, n=n_fft)
     SIG2 = fft(sig2, n=n_fft)
 
-    # Calculate a dynamic threshold (e.g., 1% of the maximum magnitude)
-    cross_power = SIG1 * np.conj(SIG2)
+    # Calculate standard cross-correlation (sig2 correlated with sig1) to match scipy convention
+    cross_power = SIG2 * np.conj(SIG1)
     cross_power_mag = np.abs(cross_power)
     
     # 0.01 to 0.05 is a standard sweet spot for noisy environments
@@ -207,10 +209,12 @@ def _calculate_gcc_phat(sig1, sig2, fs=FS, verbose=False):
         # plt.tight_layout()
         # plt.show()
 
-
+    if return_cc:
+        lags = np.arange(-n_fft // 2, n_fft // 2)
+        return lag_in_samples, cc, lags
     return lag_in_samples
 
-def _calculate_regular_then_gcc_phat(sig1, sig2, fs=FS, verbose=False, env=False):
+def _calculate_regular_then_gcc_phat(sig1, sig2, fs=FS, verbose=False, env=False, return_cc=False):
     if verbose:
         print("~" * 30)
         print("Calculating regular cross correlation then GCC-PHAT:")
@@ -233,7 +237,13 @@ def _calculate_regular_then_gcc_phat(sig1, sig2, fs=FS, verbose=False, env=False
     sig1_crop = sig1_crop * hann_window
     sig2_crop = sig2_crop * hann_window
 
-    fine_lag = _calculate_gcc_phat(sig1_crop, sig2_crop, verbose=verbose)
+    if return_cc:
+        fine_lag, cc, lags = _calculate_gcc_phat(sig1_crop, sig2_crop, verbose=verbose, return_cc=True)
+        # Shift lags by coarse_lag so that the returned lags correspond to original frames
+        lags_shifted = lags + coarse_lag
+        return coarse_lag + fine_lag, cc, lags_shifted
+    else:
+        fine_lag = _calculate_gcc_phat(sig1_crop, sig2_crop, verbose=verbose)
 
     if verbose:
         print("~" * 30)
@@ -254,14 +264,14 @@ def _crop_two_aligned_signals_around_max(sig1_aligned, sig2_aligned, fs=FS, wind
 
     return sig1_crop, sig2_crop
 
-def calculate_cross_correlation(sig1 ,sig2, preprocessing_parameters, fs=FS, verbose=False, gcc_phat=False, env=False, bandpass=False, normalize=False, svd=False):
+def calculate_cross_correlation(sig1 ,sig2, preprocessing_parameters, fs=FS, verbose=False, gcc_phat=False, env=False, bandpass=False, normalize=False, svd=False, return_cc=False):
     
     sig1, sig2 = process_signals_for_correlation([sig1, sig2], preprocessing_parameters, gcc_phat)
     if gcc_phat:
-        #return _calculate_gcc_phat(sig1, sig2, fs=fs, verbose=verbose)
-        return _calculate_regular_then_gcc_phat(sig1, sig2, fs=fs, verbose=verbose, env=env)
+        return _calculate_gcc_phat(sig1, sig2, fs=fs, verbose=verbose, return_cc=return_cc)
+        #return _calculate_regular_then_gcc_phat(sig1, sig2, fs=fs, verbose=verbose, env=env, return_cc=return_cc)
 
-    return _calculate_regular_cross_correlation(sig1, sig2, fs=fs, verbose=verbose)
+    return _calculate_regular_cross_correlation(sig1, sig2, fs=fs, verbose=verbose, return_cc=return_cc)
 
 
 
