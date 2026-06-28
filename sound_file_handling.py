@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime
 
 import numpy as np
+# pyrefly: ignore [missing-import]
 import soundfile as sf
 
 FS = 44100
@@ -15,7 +16,10 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 def save_audio_file(audio, prefix, suffix="", fs=FS):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    file_name = f'{OUTPUT_FOLDER}/{prefix}_{timestamp}_{suffix}.wav'
+    date_folder = timestamp.split('_')[0]
+    out_dir = f"{OUTPUT_FOLDER}/{date_folder}/{timestamp}"
+    os.makedirs(out_dir, exist_ok=True)
+    file_name = f'{out_dir}/{prefix}_{timestamp}_{suffix}.wav'
     sf.write(file_name, audio, fs)
     print(f"Saved {file_name}")
 
@@ -193,14 +197,24 @@ def match_n_signals_and_trim_zeroes(signals, fs=FS):
 
     return cropped_signals
 
-def load_wav_signal(file_name):
+def load_wav_signal(file_desc, file_name):
     """
     Reads a WAV file and returns the signal and its sampling frequency.
     Ensures the output is a 1D numpy array (mono) for mathematical operations.
     """
+    date_folder = file_desc.split('_')[0]
+    nested_path = f"{OUTPUT_FOLDER}/{date_folder}/{file_desc}/{file_name}"
+    flat_path = f"{OUTPUT_FOLDER}/{file_name}"
+    
+    if os.path.exists(nested_path):
+        target_path = nested_path
+    elif os.path.exists(flat_path):
+        target_path = flat_path
+    else:
+        target_path = nested_path
+        
     # Read the audio data and sampling frequency
-    file_name = f"{OUTPUT_FOLDER}/{file_name}"
-    signal, fs = sf.read(file_name)
+    signal, fs = sf.read(target_path)
 
     # Check if the signal is multi-channel (e.g., stereo)
     if len(signal.shape) > 1:
@@ -213,8 +227,8 @@ def load_two_wav_files(file_desc):
     mic1_filename = f"{file_desc}_mic1.wav"
     mic2_filename = f"{file_desc}_mic2.wav"
 
-    sig1, fs1 = load_wav_signal(mic1_filename)
-    sig2, fs2 = load_wav_signal(mic2_filename)
+    sig1, fs1 = load_wav_signal(file_desc, mic1_filename)
+    sig2, fs2 = load_wav_signal(file_desc, mic2_filename)
 
     freq_lst = [fs1, fs2]
     frequency_different_from_FS = next((i for i, item in enumerate(freq_lst) if item != FS), -1)
@@ -241,13 +255,17 @@ def load_n_wav_files(file_desc, n=None):
         mic_filename = f"{file_desc}_mic{i}.wav"
 
         # If n is NOT specified, stop when we can't find the next consecutive file
-        if n is None and not os.path.exists(OUTPUT_FOLDER + "/" + mic_filename):
-            if i == 1:
-                raise FileNotFoundError(f"Error: Could not find the starting file '{mic_filename}'")
-            break
+        if n is None:
+            date_folder = file_desc.split('_')[0]
+            nested_path = f"{OUTPUT_FOLDER}/{date_folder}/{file_desc}/{mic_filename}"
+            flat_path = f"{OUTPUT_FOLDER}/{mic_filename}"
+            if not (os.path.exists(nested_path) or os.path.exists(flat_path)):
+                if i == 1:
+                    raise FileNotFoundError(f"Error: Could not find the starting file '{mic_filename}'")
+                break
 
         # Load the signal (assuming load_wav_signal is imported/available)
-        sig, fs = load_wav_signal(mic_filename)
+        sig, fs = load_wav_signal(file_desc, mic_filename)
 
         # Ensure all sampling frequencies perfectly match the first file
 

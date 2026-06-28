@@ -1,19 +1,17 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.io import wavfile
-from scipy.signal import spectrogram
-import os
-import glob
-import argparse
+# pyrefly: ignore [missing-import]
+import torch
 
 
-def plot_wav_spectrogram(wav_path, nfft=1024, noverlap=None, cmap='viridis'):
-    """Plot a spectrogram from a WAV file.
+
+def plot_wav_spectrogram(wav_path, accuracy=50, cmap='viridis'):
+    """Plot a spectrogram from a WAV file using PyTorch (GPU if available).
 
     Args:
         wav_path (str): Path to the WAV file.
-        nfft (int, optional): Window length for FFT. Defaults to 1024.
-        noverlap (int, optional): Number of overlapping samples. Defaults to nfft // 2.
+        accuracy (int, optional): Time-frequency accuracy from 0 to 100. Defaults to 50.
         cmap (str, optional): Matplotlib colormap. Defaults to 'viridis'.
     """
     sample_rate, samples = wavfile.read(wav_path)
@@ -21,47 +19,58 @@ def plot_wav_spectrogram(wav_path, nfft=1024, noverlap=None, cmap='viridis'):
     if samples.ndim > 1:
         samples = np.mean(samples, axis=1)
 
-    if noverlap is None:
-        noverlap = nfft // 2
+    # Clamp accuracy between 0 and 100
+    accuracy = max(0, min(100, accuracy))
+    
+    # Scale nfft based on accuracy (0 -> 256, 100 -> 4096)
+    nfft_vals = [256, 512, 1024, 2048, 4096]
+    idx = int((accuracy / 100.0) * 4.99)
+    nfft = nfft_vals[idx]
+    
+    # Scale hop length (higher accuracy = more overlap = finer time resolution)
+    # Factor ranges from 2 to 8 (so hop_length goes from nfft//2 down to nfft//8)
+    overlap_factor = 2 + int((accuracy / 100.0) * 6)
+    hop_length = nfft // overlap_factor
 
-    frequencies, times, Sxx = spectrogram(
-        samples,
-        fs=sample_rate,
-        window='hann',
-        nperseg=nfft,
-        noverlap=noverlap,
-        scaling='density',
-        mode='magnitude',
+    # Automatically select the best available hardware accelerator
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+        
+    print(f"Calculating spectrogram on {device} with accuracy={accuracy} (nfft={nfft}, hop_length={hop_length})")
+
+    tensor_samples = torch.tensor(samples, dtype=torch.float32, device=device)
+    window = torch.hann_window(nfft, device=device)
+    
+    stft = torch.stft(
+        tensor_samples, 
+        n_fft=nfft, 
+        hop_length=hop_length, 
+        win_length=nfft, 
+        window=window, 
+        return_complex=True
     )
+    
+    Sxx = torch.abs(stft).cpu().numpy()
+    
+    frequencies = np.linspace(0, sample_rate / 2, Sxx.shape[0])
+    times = np.linspace(0, len(samples) / sample_rate, Sxx.shape[1])
 
     plt.figure(figsize=(10, 5))
     plt.pcolormesh(times, frequencies, 10 * np.log10(Sxx + 1e-10), shading='gouraud', cmap=cmap)
     plt.colorbar(label='Intensity [dB]')
     plt.ylabel('Frequency [Hz]')
     plt.xlabel('Time [s]')
-    plt.title(f'Spectrogram of {wav_path}')
+    plt.title(f'Spectrogram of {wav_path} (accuracy: {accuracy})')
     plt.tight_layout()
     plt.show()
 
 
-def find_latest_wav(directory='.'):
-    """Return path to the most recently modified .wav file in directory."""
-    files = glob.glob(os.path.join(directory, '*.wav'))
-    if not files:
-        return None
-    return max(files, key=os.path.getmtime)
-
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Plot spectrogram for a WAV file. If no file is given, uses the latest .wav in the directory.')
-    parser.add_argument('wav', nargs='?', help='Path to a WAV file')
-    parser.add_argument('--dir', '-d', default='audio_recordings', help='Directory to search for latest WAV when no file provided')
-    args = parser.parse_args()
-
-    wav_path = args.wav or find_latest_wav(args.dir)
-    if wav_path is None:
-        print('No .wav files found.')
-    else:
-        print(f'Using WAV: {wav_path}')
-        plot_wav_spectrogram(wav_path)
+    wav_path = "audio_recordings/2026-06-18/2026-06-18_23-25-42/2026-06-18_23-25-42_mic1.wav"
+    plot_wav_spectrogram(wav_path, accuracy=100)
 

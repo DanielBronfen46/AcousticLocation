@@ -1,0 +1,305 @@
+================================================================================
+  ACOUSTIC LOCALIZATION PIPELINE — DOCUMENTATION
+  File: gpu_localizer_pipeline.py
+  Last updated: 2026-06-22
+================================================================================
+
+
+OVERVIEW
+--------
+This pipeline localizes the 2D position of an acoustic source (e.g., a hand
+clap) using three microphones. It records audio simultaneously on three Android
+phones, then calculates the Time Difference of Arrival (TDOA) between each
+microphone pair using GPU-accelerated signal processing. The TDOA values are
+then converted into geometric hyperbolas whose intersection gives the (x, y)
+position of the sound source.
+
+Target accuracy on test data: ~0.1 to 0.4 meters for clean recordings.
+
+
+HARDWARE SETUP
+--------------
+- 3 microphones (Android phones recording .wav files simultaneously)
+- Sampling rate: 44,100 Hz
+- Microphone physical positions (configurable in LocalizerConfig.mics_dict):
+
+      Mic 0:  x =  1.5 m,  y = 0.0 m   (right)
+      Mic 1:  x = -1.5 m,  y = 0.0 m   (left)
+      Mic 2:  x =  0.0 m,  y = 3.0 m   (top center)
+
+- Recording convention:
+    - Seconds 0-10:   Calibration clap (at a fixed point, usually 0,0)
+    - Seconds 20-29:  Target clap (at the location to be localized)
+
+
+RECORDING FILE STRUCTURE
+------------------------
+audio_recordings/
+  YYYY-MM-DD/
+    YYYY-MM-DD_HH-MM-SS/
+      mic1.wav
+      mic2.wav
+      mic3.wav
+
+
+CONFIGURATION  (class LocalizerConfig)
+---------------------------------------
+  target_files    : Tuple of folder names to process in batch
+  mics_dict       : Physical microphone positions (meters)
+  plot_steps      : If True, show cross-correlation and hyperbola plots
+  fs              : Sampling rate (default: 44100 Hz)
+  favor_center    : Toggle center-favoring fallback in GCC-PHAT peak finding
+  isolate_target  : If True, isolate only the loudest 1-second event in the
+                    target window before correlation (currently False — the
+                    full 9-second window is used for best averaging accuracy)
+
+
+================================================================================
+  PIPELINE STAGES  (executed per recording in process_timeline())
+================================================================================
+
+
+STAGE 1 — HARDWARE SYNC CALIBRATION
+--------------------------------------
+Purpose:
+  Three separate Android phones all start recording at slightly different
+  moments. This stage measures that exact time offset so it can be subtracted
+  from the acoustic TDOA measurements later.
+
+How:
+  - Take the first 10 seconds of audio (the calibration window) from all 3 mics.
+  - Run GCC-PHAT cross-correlation between each pair:
+      Mic1 vs Mic2  ->  offset_1_2 (samples)
+      Mic1 vs Mic3  ->  offset_1_3 (samples)
+      Mic2 vs Mic3  ->  offset_2_3 (samples)
+  - These offsets represent the hardware recording lag between each phone.
+
+Output:
+  Hardware Sync Offsets (in samples) for all 3 mic pairs.
+
+
+STAGE 2 — TARGET WINDOW EXTRACTION
+--------------------------------------
+Purpose:
+  Isolate the portion of the recording that contains the actual clap to locate.
+
+How:
+  - Slice the audio from second 20 to second 29 (9-second target window) from
+    all 3 microphones.
+  - These 9 seconds are fed directly into Stage 3 without any pre-processing.
+
+Note on discarded approaches:
+  SVD (Singular Value Decomposition) denoising was tested but found to have
+  zero effect on GCC-PHAT accuracy — because GCC-PHAT normalizes out all
+  amplitudes by design (Phase Transform step). SVD was therefore removed to
+  improve performance.
+
+Output:
+  clean_1, clean_2, clean_3  — raw 9-second audio tensors on GPU.
+
+
+STAGE 3 — GCC-PHAT CROSS-CORRELATION  (gcc_phat method)
+----------------------------------------------------------
+Purpose:
+  Measure the raw time delay (in samples) between each microphone pair,
+  including both the hardware offset and the acoustic delay caused by sound
+  traveling through air.
+
+Algorithm — GCC-PHAT (Generalized Cross-Correlation with Phase Transform):
+  1. Compute FFT of both signals.
+  2. Compute the Cross-Power Spectrum: X1 * conj(X2)
+  3. Apply Phase Transform (PHAT): divide by the magnitude of the cross-power.
+     This step normalizes out all amplitude information, making the algorithm
+     immune to low-frequency room resonances that would otherwise bias the
+     result. It relies purely on the phase alignment across all frequencies.
+  4. Compute the Inverse FFT and shift to center the zero-lag.
+  5. Run scipy.signal.find_peaks() to find all local maxima in the
+     correlation curve.
+  6. Filter peaks to only those within a physically possible delay range
+     (based on the maximum microphone separation distance).
+  7. Select the highest peak in that range as the time delay.
+     If favor_center=True and the absolute maximum peak is physically
+     impossible (a very distant echo), fall back to the highest peak
+     within 90% of the maximum that is closest to zero lag.
+
+Output per pair:
+  raw_tdoa  — delay in samples (positive = sig2 is delayed relative to sig1)
+  cc_array  — the full correlation curve (saved for the retry logic below)
+  peaks     — all detected peak indices in the cc array (saved for retry)
+
+
+STAGE 4 — TRUE TDOA CALCULATION
+---------------------------------
+Purpose:
+  Subtract the hardware sync offset to get the pure acoustic delay.
+
+Formula:
+  true_tdoa_1_2 = raw_tdoa_1_2 - offset_1_2
+  true_tdoa_1_3 = raw_tdoa_1_3 - offset_1_3
+  true_tdoa_2_3 = raw_tdoa_2_3 - offset_2_3
+
+Output:
+  True TDOA in samples and seconds for each pair.
+
+
+STAGE 5 — SELF-CONSISTENCY CHECK & NEXT-BEST-PEAK RETRY
+----------------------------------------------------------
+Purpose:
+  Verify the geometric integrity of the three TDOA measurements. By the laws
+  of physics, the following must always hold:
+
+      t(1->3)  =  t(1->2)  +  t(2->3)
+
+  If this equation fails by more than the consistency threshold, one of the
+  three measurements is corrupted (e.g., a strong echo was mistaken for the
+  direct-path sound arrival).
+
+Threshold:
+  consistency_threshold = max(20, max_physical_delay // 5)
+  (based on the geometry of the microphone array)
+
+Consistency error calculation:
+  error_1_2 = |t_1_2 - (t_1_3 - t_2_3)|
+  error_1_3 = |t_1_3 - (t_1_2 + t_2_3)|
+  error_2_3 = |t_2_3 - (t_1_3 - t_1_2)|
+
+  The pair with the largest error is flagged as the outlier.
+
+On inconsistency detected — NEXT-BEST-PEAK RETRY:
+  Instead of immediately discarding the outlier pair, the pipeline goes back
+  to its saved cross-correlation curve and tries the next-highest peaks in
+  descending order of height:
+
+    for each alternative peak (sorted by cc value, highest first):
+      1. Convert the peak index to a candidate TDOA value.
+      2. Substitute it into the triplet of measurements.
+      3. Recalculate the consistency error.
+      4. If the new error is within the threshold -> ACCEPT the correction.
+         All 3 pairs contribute to the geometry. Log the improvement.
+      5. If no alternative peak satisfies consistency -> DISCARD the outlier
+         pair and locate using only the 2 remaining pairs.
+
+Why this works:
+  GCC-PHAT finds ALL peaks in the correlation curve. The first peak selected
+  may be a strong echo. The second or third peak is often the genuine
+  direct-path arrival. By testing them in order, the pipeline recovers
+  accurate measurements that would otherwise be thrown away.
+
+
+STAGE 6 — GEOMETRIC SOURCE LOCALIZATION
+-----------------------------------------
+Purpose:
+  Convert the acoustic time delays into a 2D position estimate.
+
+How:
+  1. Convert each TDOA (seconds) into a distance difference (meters):
+       delta_d = tdoa_seconds * speed_of_sound  (343 m/s)
+  2. Each (microphone_pair, distance_difference) defines a hyperbola in 2D
+     space — the set of all points equidistant from the two mics by that
+     difference.
+  3. Find the algebraic intersection of the hyperbola pairs.
+  4. Average valid intersection points to get the final (x, y) estimate.
+
+  Implementation is in:
+    locate/three_way_intersection.py  (primary, 3-mic algebraic solver)
+    locate/n_mics_intersection.py     (generalized N-mic solver)
+
+Output:
+  Estimated Source Location: x = ..., y = ...
+
+
+================================================================================
+  VALIDATED PERFORMANCE (2026-06-18 recordings, target = (-3.0, 3.0) m)
+================================================================================
+
+  Recording       Est. X    Est. Y    Error
+  --------------------------------------------------
+  22-24-18 *      -0.17     0.29      0.34 m   (target was 0,0)
+  22-27-22        -3.33     3.21      0.39 m
+  22-28-57        -2.59     2.35      0.80 m   (retry used, strong echo)
+  23-12-54        -3.29     3.15      0.33 m
+  23-15-19        -2.96     3.09      0.09 m
+  23-17-26        -2.92     2.86      0.20 m
+  23-18-39        -3.20     3.16      0.22 m
+  23-25-42         1.59    -0.56      5.35 m   (corrupted recording)
+  23-27-01        -2.63     2.95      0.38 m
+  23-30-45        -3.14     3.09      0.17 m   (retry improved this one)
+
+  9/10 recordings within 0.80 m of truth.
+  7/10 recordings within 0.40 m of truth.
+
+  * 22-24-18 clap was at (0, 0), not (-3, 3)
+
+
+================================================================================
+  KEY DESIGN DECISIONS & THINGS THAT WERE TESTED
+================================================================================
+
+  [KEPT]    GCC-PHAT over standard Cross-Correlation
+            Standard CC is dominated by low-frequency room resonances which
+            create very broad, biased correlation peaks. GCC-PHAT's Phase
+            Transform forces equal weight on all frequencies, giving a
+            needle-sharp spike at the true arrival time.
+
+  [KEPT]    Full 9-second target window (isolate_target=False)
+            A 9-second window containing multiple claps benefits from implicit
+            frequency-domain averaging. All claps contribute coherently to
+            the same GCC-PHAT spike, while random noise averages out. A 1-second
+            isolated window is too sensitive to single-clap echoes.
+
+  [REMOVED] SVD (Singular Value Decomposition) Denoising
+            Tested and confirmed to have zero effect on GCC-PHAT output.
+            GCC-PHAT's PHAT step already normalizes all amplitudes, making
+            amplitude-domain denoising mathematically irrelevant. Removed to
+            improve pipeline speed.
+
+  [TESTED]  "Blind Target Detection" (Dynamic Envelope Window + Auto-BPF)
+            Attempted to automatically shrink-wrap the target window around the
+            loudest event (down to 0.5s) and auto-calculate frequency bounds.
+            FAILED. Shrink-wrapping removes the implicit averaging power of the
+            9-second window, causing GCC-PHAT to lock onto specific room echoes
+            rather than the direct-path sound. This method is suited for long
+            sweeps/chirps in open fields, not short impulsive claps indoors.
+
+  [TESTED]  Reference Anchor Alignment
+            Attempted to slice a 1.0s template from the loudest microphone and
+            slide it across the other microphones to align the events before
+            calculating math. FAILED. Room reverberation is so complex that a
+            1.0s template from Mic 1 looks vastly different from Mic 2. The
+            alignment frequently locked onto background noise 3-5 seconds away.
+
+  [TESTED]  Robustness Against Data Augmentation (Noise & Echoes)
+            Created `sound_augmentation.py` to test the pipeline against an
+            aggressively noisy dataset: 
+             - Added Gaussian White Noise at 20 dB SNR (relative to clap peak).
+             - Added synthetic random echoes (5-30ms delay, 20-50% amplitude).
+            RESULT: Flawless. The baseline pipeline output the exact same
+            coordinates down to the 4th decimal place.
+            Why: The 9-second window mathematically cancels out zero-mean Gaussian
+            noise in the GCC-PHAT step, and the Geometric Self-Consistency Retry
+            logic successfully rejected the false peaks created by the synthetic
+            echoes.
+            
+  [TESTED]  Band-Pass Filter (50 Hz - 5000 Hz)
+            Filtering eliminated some noisy recordings' consistency errors but
+            degraded the overall spatial accuracy. Human claps have energy up
+            to 24,000 Hz, and removing those high-frequency components blurs
+            the GCC-PHAT correlation peak. Reverted.
+
+  [TESTED]  Standard Cross-Correlation (no PHAT)
+            Results were completely chaotic — coordinates off by tens of
+            meters for most recordings. This confirmed that GCC-PHAT is
+            essential. Reverted.
+
+
+================================================================================
+  DEPENDENCIES
+================================================================================
+
+  torch               GPU tensor math and FFT (PyTorch)
+  numpy               Array operations
+  scipy.signal        Peak finding (find_peaks)
+  matplotlib          Optional visualizations
+  locate/             Local geometry solvers (hyperbola intersections)
+  plotting_functions  Local signal plotting helpers
+  sound_file_handling Local .wav loading utilities
