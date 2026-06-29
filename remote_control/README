@@ -1,0 +1,65 @@
+## 🌐 Multi-Device Wireless ADB Setup Guide
+
+To run the synchronized acoustic capture pipeline, all hardware nodes (microphones) must be connected to the laptop via ADB over the wireless network. Because one phone hosts the hotspot while others connect as clients, use the specific sequences below to establish the grid.
+
+### 🧰 Prerequisites & Initial Clean Slate
+Before connecting any devices, ensure your laptop's ADB daemon cache is completely clear of stale or "ghost" IP routes:
+```powershell
+adb kill-server
+```
+
+### 📱 Step 1: Connect the Client Phone(s) (e.g., Phone B / Phone 1)
+Client phones use Android's modern Wireless Debugging protocol, which randomizes connection ports.
+
+1. Connect the phone to the laptop's mobile hotspot.
+2. Navigate to **Settings ➔ Developer Options ➔ Wireless Debugging**.
+3. Toggle the switch **OFF**, then **ON** to force a fresh broadcast.
+4. **If already paired previously:** Note the **IP address & Port** displayed on the main screen (e.g., `10.59.226.201:33197`).
+5. Run the connection string directly:
+```powershell
+adb connect IP_ADDRESS:MAIN_PORT
+```
+6. **If the connection fails or keys are stale:** Tap **"Forget/Delete"** your laptop under the *Paired devices* list on the phone.
+7. Tap **"Pair device with pairing code"** to open the pairing popup.
+8. Run the pairing sequence using the unique *Pairing Port* and *6-digit code* shown:
+```powershell
+adb pair IP_ADDRESS:PAIRING_PORT
+```
+9. Close the popup and use the main screen's port to run the `adb connect` command again.
+
+### 🔥 Step 2: Connect the Hotspot Host Phone (e.g., Amibar / S24)
+Android completely locks out the Wireless Debugging UI while a phone is actively hosting a mobile hotspot. To bypass this, force open the legacy static TCP listener over a physical USB handshake.
+
+1. **Keep the client phones wireless**, but plug the **Hotspot Host Phone into the laptop** using a USB cable.
+2. Open your terminal and explicitly command the laptop to open static port `5555` **strictly through the physical USB channel** (ignoring the wireless client phones):
+```powershell
+adb -d tcpip 5555
+```
+*Verify the terminal replies with: `restarting in TCP mode port: 5555`.*
+3. **Unplug the USB cable** from the hotspot phone completely.
+4. Find the phone's current network IP address. Because it acts as the router, it lives at your laptop's current network gateway. Open PowerShell and check your network adapter:
+```powershell
+ipconfig
+```
+*Look under "Wireless LAN adapter Wi-Fi" and copy the **Default Gateway** IP address (e.g., `10.59.226.153`).*
+5. Establish the permanent wireless bridge to the hotspot phone using that gateway IP and static port `5555`:
+```powershell
+adb connect GATEWAY_IP:5555
+```
+
+### 🎯 Step 3: Verify the Acoustic Array Inventory
+Before executing any Python automation, verify that the ADB daemon sees every channel clearly as an authorized hardware node:
+
+```powershell
+adb devices -l
+```
+
+**Expected Healthy Output:**
+
+```
+List of devices attached
+10.59.226.201:33197      device product:... (Client Node)
+10.59.226.153:5555       device product:... (Hotspot Host Node)
+```
+
+*If a device shows `unauthorized`, look at its physical screen and accept the secure RSA fingerprint prompt.*
